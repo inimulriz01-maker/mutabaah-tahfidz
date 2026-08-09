@@ -1,0 +1,118 @@
+diff --git a/.env.example b/.env.example
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/.env.example
+@@ -0,0 +1,4 @@
++# Copy this file to .env and replace the values with your Supabase project settings.
++VITE_SUPABASE_URL=https://your-project-ref.supabase.co
++VITE_SUPABASE_ANON_KEY=your-anon-public-key
++
+diff --git a/SUPABASE_SETUP.md b/SUPABASE_SETUP.md
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/SUPABASE_SETUP.md
+@@ -0,0 +1,178 @@
++# Supabase Setup and RLS for mutabaah-tahfidz
++
++## 1. Environment variables
++
++Copy `.env.example` to `.env` and set these values:
++
++```env
++VITE_SUPABASE_URL=https://<your-project-ref>.supabase.co
++VITE_SUPABASE_ANON_KEY=<your-public-anon-key>
++```
++
++Do not commit `.env` to Git.
++
++## 2. Supabase table migration
++
++Run this SQL in Supabase SQL Editor for the `riwayat`, `riwayat_ukl`, and `riwayat_absensi_guru` tables:
++
++```sql
++-- Add audit fields for production-ready persistence
++alter table if exists public.riwayat
++  add column if not exists created_by text,
++  add column if not exists updated_by text,
++  add column if not exists created_at timestamp with time zone default now(),
++  add column if not exists updated_at timestamp with time zone default now();
++
++alter table if exists public.riwayat_ukl
++  add column if not exists created_by text,
++  add column if not exists updated_by text,
++  add column if not exists created_at timestamp with time zone default now(),
++  add column if not exists updated_at timestamp with time zone default now();
++
++alter table if exists public.riwayat_absensi_guru
++  add column if not exists created_by text,
++  add column if not exists updated_by text,
++  add column if not exists created_at timestamp with time zone default now(),
++  add column if not exists updated_at timestamp with time zone default now();
++```
++
++If the tables do not exist, create them first with the same columns as the app uses.
++
++## 3. Enable Supabase Auth
++
++1. In Supabase dashboard, open `Authentication` > `Settings`.
++2. Under `Email`, enable `Email Auth` and `Magic Link` if you want passwordless login.
++3. Save changes.
++
++## 4. RLS policies
++
++To enable RLS safely, use these commands for each table. Replace `public` with your schema if different.
++
++```sql
++-- Enable row level security
++alter table public.riwayat enable row level security;
++alter table public.riwayat_ukl enable row level security;
++alter table public.riwayat_absensi_guru enable row level security;
++
++-- Allow authenticated users to read their own data
++create policy "riwayat authenticated read" on public.riwayat
++  for select using (auth.role() = 'authenticated');
++create policy "riwayat authenticated insert" on public.riwayat
++  for insert with check (auth.role() = 'authenticated');
++create policy "riwayat authenticated update" on public.riwayat
++  for update using (created_by = auth.uid()) with check (created_by = auth.uid());
++create policy "riwayat authenticated delete" on public.riwayat
++  for delete using (created_by = auth.uid());
++
++create policy "riwayat_ukl authenticated read" on public.riwayat_ukl
++  for select using (auth.role() = 'authenticated');
++create policy "riwayat_ukl authenticated insert" on public.riwayat_ukl
++  for insert with check (auth.role() = 'authenticated');
++create policy "riwayat_ukl authenticated update" on public.riwayat_ukl
++  for update using (created_by = auth.uid()) with check (created_by = auth.uid());
++create policy "riwayat_ukl authenticated delete" on public.riwayat_ukl
++  for delete using (created_by = auth.uid());
++
++create policy "riwayat_absensi_guru authenticated read" on public.riwayat_absensi_guru
++  for select using (auth.role() = 'authenticated');
++create policy "riwayat_absensi_guru authenticated insert" on public.riwayat_absensi_guru
++  for insert with check (auth.role() = 'authenticated');
++create policy "riwayat_absensi_guru authenticated update" on public.riwayat_absensi_guru
++  for update using (created_by = auth.uid()) with check (created_by = auth.uid());
++create policy "riwayat_absensi_guru authenticated delete" on public.riwayat_absensi_guru
++  for delete using (created_by = auth.uid());
++```
++
++> Note: The app currently uses local role simulation, not full Supabase auth. If you move to full Supabase Auth, update `currentUser.userId` from `supabase.auth.getSession()`.
++
++## 5. Deploy to Vercel
++
++1. Create a Vercel project and connect the GitHub repo.
++2. Add environment variables in Vercel:
++   - `VITE_SUPABASE_URL`
++   - `VITE_SUPABASE_ANON_KEY`
++3. Deploy.
++
++## 6. Verification
++
++After deployment:
++- test input di `mutabaah`, `UKL`, dan `absensi guru`.
++- pastikan data muncul di Supabase tabel `riwayat`, `riwayat_ukl`, `riwayat_absensi_guru`.
++- refresh beberapa perangkat untuk verifikasi sinkronisasi.
++
