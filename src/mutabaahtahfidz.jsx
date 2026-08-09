@@ -3748,19 +3748,23 @@ export default function App() {
 
         </main>
 
-        <nav className="lg:hidden bg-white border-t border-slate-200/80 px-2 py-2 flex justify-around items-center fixed bottom-0 left-0 right-0 z-40 shadow-xl">
-          {dynamicNavItems.map(item => (
-            <button 
-              key={item.key} 
-              onClick={() => handleMenuChange(item.key)} 
-              className={`flex flex-col items-center justify-center py-1.5 px-2 rounded-xl transition ${activeMenu === item.key ? 'text-blue-600 font-bold bg-blue-50/80' : 'text-slate-500 hover:text-slate-800'}`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mb-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                {item.icon}
-              </svg>
-              <span className="text-[11px] mt-1">{item.label}</span>
-            </button>
-          ))}
+        <nav className="lg:hidden bg-white border-t border-slate-200/80 px-2 py-2 fixed bottom-0 left-0 right-0 z-40 shadow-xl">
+          <div className="flex gap-2 overflow-x-auto px-1 py-1 scroll-smooth snap-x snap-mandatory" style={{ WebkitOverflowScrolling: 'touch' }}>
+            {dynamicNavItems.map(item => (
+              <button
+                key={item.key}
+                onClick={() => handleMenuChange(item.key)}
+                className={`flex-shrink-0 snap-center flex flex-col items-center justify-center min-w-[72px] px-3 py-2 rounded-2xl transition duration-200 ease-out active:scale-95 ${activeMenu === item.key ? 'bg-blue-50/90 text-blue-600 shadow-md' : 'bg-slate-50/90 text-slate-500 hover:text-slate-800 hover:bg-slate-100'}`}
+              >
+                <div className={`flex items-center justify-center w-10 h-10 rounded-2xl transition ${activeMenu === item.key ? 'bg-blue-100 shadow' : 'bg-slate-100'}`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    {item.icon}
+                  </svg>
+                </div>
+                <span className="text-[11px] mt-1">{item.label}</span>
+              </button>
+            ))}
+          </div>
         </nav>
       </div>
     </div>
