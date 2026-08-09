@@ -1628,9 +1628,7 @@ export default function App() {
     e.preventDefault();
     const absensiItem = {
       id: Date.now(),
-      ...absensiGuruData,
-      createdBy: getCurrentUserId(),
-      updatedBy: getCurrentUserId()
+      ...absensiGuruData
     };
 
     setRiwayatAbsensiGuru([...riwayatAbsensiGuru, absensiItem]);
