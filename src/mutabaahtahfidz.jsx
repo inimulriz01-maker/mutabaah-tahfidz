@@ -1,7 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { supabase } from './supabase';
+import React, { useState, useEffect, useRef } from 'react';
+import { supabase, supabaseConfig } from './supabase';
+import { buildSupabasePayload, deserializeSupabaseRow, filterRiwayatRows, mergeRowsWithLatestState } from './supabasePayloads';
+import { formatDateDisplay, formatDateLocal, getHariByTanggal, getInitialHari, getTanggalByHari, getTodayDateStr } from './dateUtils';
 
 export default function App() {
+  const repairedRiwayatIdsRef = useRef(new Set());
+
   const dataHalaqoh = {
     "Halaqoh Tsuroyya": [
       "Isa Abdullah",
@@ -160,7 +164,7 @@ export default function App() {
     "'Abasa": 42, "At-Takwir": 29, "Al-Infitar": 19, "Al-Mutaffifin": 36, "Al-Insyiqaq": 25, "Al-Buruj": 22, "At-Tariq": 17, "Al-A'la": 19, "Al-Ghasyiyah": 26, "Al-Fajr": 30,
     "Al-Balad": 20, "Asy-Syams": 15, "Al-Lail": 21, "Ad-Duha": 11, "Asy-Syarh": 8, "At-Tin": 8, "Al-'Alaq": 19, "Al-Qadr": 5, "Al-Bayyinah": 8, "Az-Zalzalah": 8,
     "Al-'Adiyat": 11, "Al-Qari'ah": 11, "At-Takasur": 8, "Al-'Asr": 3, "Al-Humazah": 9, "Al-Fil": 5, "Quraisy": 4, "Al-Ma'un": 7, "Al-Kautsar": 3, "Al-Kafirun": 6,
-    "An-Nasr": 3, "Al-Lahab": 5, "An-Nas": 6
+    "An-Nasr": 3, "Al-Lahab": 5, "Al-Ikhlas": 4, "Al-Falaq": 5, "An-Nas": 6
   };
 
   const daftarSurat = Object.keys(jumlahAyatSurah);
@@ -183,33 +187,35 @@ export default function App() {
 
   const daftarPekan = ["Pekan 1", "Pekan 2", "Pekan 3", "Pekan 4"];
 
-  const getTanggalByHari = (targetHari) => {
-    const dayMap = { 'Senin': 1, 'Selasa': 2, 'Rabu': 3, 'Jumat': 5 };
-    const targetDayNum = dayMap[targetHari] ?? 1;
-    const curr = new Date();
-    const currentDayNum = curr.getDay();
-    const diff = targetDayNum - currentDayNum;
-    const targetDate = new Date(curr);
-    targetDate.setDate(curr.getDate() + diff);
-    return targetDate.toISOString().split('T')[0];
-  };
-
-  const getInitialHari = () => {
-    const d = new Date();
-    const dayName = d.toLocaleDateString('id-ID', { weekday: 'long' });
-    const formatted = dayName.charAt(0).toUpperCase() + dayName.slice(1);
-    return ["Senin", "Selasa", "Rabu", "Jumat"].includes(formatted) ? formatted : "Senin";
-  };
-
   const getPekanLabel = (dateStr) => {
     if (!dateStr) return "Pekan 1 Bulan Ini";
-    const d = new Date(dateStr);
+    const d = new Date(`${dateStr}T00:00:00`);
     const day = d.getDate();
     const pekanNum = Math.min(Math.ceil(day / 7), 4);
     const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
     const mName = months[d.getMonth()];
     const year = d.getFullYear();
     return `Pekan ${pekanNum} Bulan ${mName} ${year}`;
+  };
+
+  const getMonthLabel = (dateStr) => {
+    if (!dateStr) return 'Bulan Tidak Diketahui';
+    const d = new Date(`${dateStr}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return 'Bulan Tidak Diketahui';
+    const months = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+    return `${months[d.getMonth()]} ${d.getFullYear()}`;
+  };
+
+  const getSimplePekan = (dateStr) => {
+    const label = getPekanLabel(dateStr);
+    const match = label.match(/Pekan\s\d+/i);
+    return match ? match[0] : 'Pekan 1';
+  };
+
+  const getTargetSesiByPeriode = (periode) => {
+    if (periode === 'bulan') return 16;
+    if (periode === 'pekan') return 4;
+    return 1;
   };
 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -230,8 +236,23 @@ export default function App() {
 
   const [adminHalaqohFilter, setAdminHalaqohFilter] = useState('Semua');
   const [adminPeriodeFilter, setAdminPeriodeFilter] = useState('semua');
+  const [adminFilterHari, setAdminFilterHari] = useState('');
   const [adminFilterTanggal, setAdminFilterTanggal] = useState('');
+  const [adminFilterPekan, setAdminFilterPekan] = useState('');
   const [adminFilterBulan, setAdminFilterBulan] = useState('');
+
+  const [absensiPeriodeFilter, setAbsensiPeriodeFilter] = useState('semua');
+  const [absensiFilterHari, setAbsensiFilterHari] = useState('');
+  const [absensiFilterTanggal, setAbsensiFilterTanggal] = useState('');
+  const [absensiFilterPekan, setAbsensiFilterPekan] = useState('');
+  const [absensiFilterBulan, setAbsensiFilterBulan] = useState('');
+  const [absensiHalaqohFilter, setAbsensiHalaqohFilter] = useState('Semua');
+
+  const [portalPeriodeFilter, setPortalPeriodeFilter] = useState('pekan');
+  const [portalFilterHari, setPortalFilterHari] = useState('');
+  const [portalFilterTanggal, setPortalFilterTanggal] = useState('');
+  const [portalFilterPekan, setPortalFilterPekan] = useState('');
+  const [portalFilterBulan, setPortalFilterBulan] = useState('');
 
   const [editingId, setEditingId] = useState(null);
 
@@ -323,7 +344,29 @@ export default function App() {
     year: 'numeric'
   });
 
-  const todayDateStr = new Date().toISOString().split('T')[0];
+  const todayDateStr = getTodayDateStr();
+
+  useEffect(() => {
+    setAdminHalaqohFilter('Semua');
+    setAdminPeriodeFilter('semua');
+    setAdminFilterHari('');
+    setAdminFilterTanggal('');
+    setAdminFilterPekan('');
+    setAdminFilterBulan('');
+
+    setAbsensiPeriodeFilter('semua');
+    setAbsensiFilterHari('');
+    setAbsensiFilterTanggal('');
+    setAbsensiFilterPekan('');
+    setAbsensiFilterBulan('');
+    setAbsensiHalaqohFilter('Semua');
+
+    setPortalPeriodeFilter('pekan');
+    setPortalFilterHari('');
+    setPortalFilterTanggal('');
+    setPortalFilterPekan('');
+    setPortalFilterBulan('');
+  }, [currentUser?.userId]);
 
   const handleLoginSubmit = (e) => {
     e.preventDefault();
@@ -367,17 +410,19 @@ export default function App() {
           ustadz: manageGuruPengampu[guruInfo.halaqoh] || 'Ustadz/Ustadzah'
         }));
         const defaultH = getInitialHari();
+        const todayDate = getTodayDateStr();
         setFormData(prev => ({
           ...prev,
-          tanggal: getTanggalByHari(defaultH),
+          tanggal: todayDate,
           hari: defaultH
         }));
         setAbsensiGuruData(prev => ({
           ...prev,
           namaHalaqoh: guruInfo.halaqoh,
           ustadz: manageGuruPengampu[guruInfo.halaqoh] || 'Ustadz/Ustadzah',
-          tanggal: getTanggalByHari(defaultH),
-          hari: defaultH
+          tanggal: todayDate,
+          hari: defaultH,
+          pekan: getSimplePekan(todayDate)
         }));
         setActiveMenu('dashboard');
       } else {
@@ -437,7 +482,7 @@ export default function App() {
 
     const roleMenus = {
       admin: ['dashboard', 'input', 'riwayat', 'ukl', 'rapor', 'halaqoh', 'murid', 'ortu', 'absensi-guru', 'pengaturan'],
-      guru: ['dashboard', 'input', 'riwayat', 'ukl', 'rapor', 'absensi-guru'],
+      guru: ['dashboard', 'input', 'riwayat', 'ukl', 'rapor', 'ortu', 'absensi-guru'],
       kepsek: ['dashboard', 'riwayat', 'rapor', 'murid', 'ortu', 'halaqoh', 'absensi-guru', 'pengaturan'],
       kurikulum: ['dashboard', 'rapor', 'halaqoh', 'murid', 'riwayat', 'ortu', 'absensi-guru', 'pengaturan'],
       kesiswaan: ['dashboard', 'rapor', 'halaqoh', 'murid', 'absensi-guru', 'riwayat', 'ortu'],
@@ -449,7 +494,7 @@ export default function App() {
 
   const [riwayat, setRiwayat] = useState(() => {
     const saved = localStorage.getItem('alafiyah_riwayat');
-    return saved ? JSON.parse(saved) : [];
+    return supabaseConfig.isConfigured ? [] : (saved ? JSON.parse(saved) : []);
   });
   useEffect(() => {
     localStorage.setItem('alafiyah_riwayat', JSON.stringify(riwayat));
@@ -457,7 +502,7 @@ export default function App() {
 
   const [riwayatUkl, setRiwayatUkl] = useState(() => {
     const saved = localStorage.getItem('alafiyah_ukl');
-    return saved ? JSON.parse(saved) : [];
+    return supabaseConfig.isConfigured ? [] : (saved ? JSON.parse(saved) : []);
   });
   useEffect(() => {
     localStorage.setItem('alafiyah_ukl', JSON.stringify(riwayatUkl));
@@ -465,7 +510,7 @@ export default function App() {
 
   const [riwayatAbsensiGuru, setRiwayatAbsensiGuru] = useState(() => {
     const saved = localStorage.getItem('alafiyah_absensi_guru');
-    return saved ? JSON.parse(saved) : [];
+    return supabaseConfig.isConfigured ? [] : (saved ? JSON.parse(saved) : []);
   });
   useEffect(() => {
     localStorage.setItem('alafiyah_absensi_guru', JSON.stringify(riwayatAbsensiGuru));
@@ -479,12 +524,11 @@ export default function App() {
     localStorage.setItem('alafiyah_student_details', JSON.stringify(storedStudentDetails));
   }, [storedStudentDetails]);
 
-  const toSnakeCase = (str) => str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-  const toCamelCase = (str) => str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-  const mapKeys = (obj, mapper) => Object.fromEntries(
-    Object.entries(obj).map(([key, value]) => [mapper(key), value])
-  );
-
+  const createRecordId = () => {
+    const base = Date.now();
+    const suffix = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    return Number(`${base}${suffix}`);
+  };
   const handleSupabaseError = (error, context) => {
     if (!error) return;
 
@@ -496,16 +540,54 @@ export default function App() {
     }
 
     console.error(`[Supabase:${context}]`, message || error);
+    if (['insert', 'update', 'check', 'upsert'].some(prefix => context.startsWith(prefix))) {
+      alert(`Gagal menyimpan data ke database: ${message || 'Periksa konfigurasi Supabase.'}`);
+    }
   };
 
   const upsertSupabaseRow = async (table, row) => {
+    if (!supabaseConfig.isConfigured || !supabaseConfig.url || !supabaseConfig.anonKey) {
+      console.warn(`[Supabase:${table}] Konfigurasi Supabase belum siap. Data tetap tersimpan lokal.`);
+      return null;
+    }
+
     try {
-      const snakeRow = mapKeys(row, toSnakeCase);
-      const { data, error } = await supabase.from(table).upsert(snakeRow, { onConflict: 'id' });
-      handleSupabaseError(error, `upsert ${table}`);
-      return data;
+      const payload = buildSupabasePayload(table, row);
+      const url = `${supabaseConfig.url}/rest/v1/${table}`;
+      const headers = {
+        apikey: supabaseConfig.anonKey,
+        Authorization: `Bearer ${supabaseConfig.anonKey}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=representation,resolution=merge-duplicates',
+      };
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify([payload]),
+      });
+
+      const responseText = await response.text();
+      let responseData = null;
+      try {
+        responseData = responseText ? JSON.parse(responseText) : null;
+      } catch (parseError) {
+        console.warn('[Supabase:parse] respons tidak valid', parseError);
+      }
+
+      if (!response.ok) {
+        const message = responseData?.message || responseText || `Request gagal dengan status ${response.status}`;
+        handleSupabaseError({ message }, `insert ${table}`);
+        return null;
+      }
+
+      if (import.meta.env.DEV) {
+        console.log(`[Supabase:${table}] berhasil disimpan`);
+      }
+      return responseData;
     } catch (error) {
       console.error(`[Supabase:upsert ${table}]`, error);
+      alert('Gagal menyimpan data ke database. Silakan cek koneksi Supabase.');
       return null;
     }
   };
@@ -521,58 +603,99 @@ export default function App() {
     }
   };
 
-  const mergeRemoteAndLocal = async (remoteRows, localRows, tableName) => {
-    const localById = new Map(localRows.map(item => [item.id, item]));
-    const merged = [...remoteRows];
-    const remoteIds = new Set(remoteRows.map(item => item.id));
-    const syncPromises = [];
+  const mergeRemoteAndLocal = (remoteRows, localRows) => mergeRowsWithLatestState(remoteRows, localRows);
 
-    localRows.forEach(local => {
-      if (!remoteIds.has(local.id)) {
-        merged.push(local);
-        syncPromises.push(upsertSupabaseRow(tableName, local));
-      }
-    });
-
-    if (syncPromises.length > 0) {
-      await Promise.all(syncPromises);
+  const fetchSupabaseRows = async (table) => {
+    if (!supabaseConfig.isConfigured || !supabaseConfig.url || !supabaseConfig.anonKey) {
+      return [];
     }
-    return merged;
+
+    try {
+      const url = `${supabaseConfig.url}/rest/v1/${table}?select=*&order=id.asc`;
+      const headers = {
+        apikey: supabaseConfig.anonKey,
+        Authorization: `Bearer ${supabaseConfig.anonKey}`,
+        'Content-Type': 'application/json',
+      };
+
+      const response = await fetch(url, { method: 'GET', headers });
+      const responseText = await response.text();
+
+      if (!response.ok) {
+        const message = responseText || `Request gagal dengan status ${response.status}`;
+        handleSupabaseError({ message }, `load ${table}`);
+        return [];
+      }
+
+      const data = responseText ? JSON.parse(responseText) : [];
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.error(`[Supabase:load ${table}]`, error);
+      return [];
+    }
   };
 
   const loadCentralData = async () => {
+    if (!supabaseConfig.isConfigured) {
+      console.warn('[Supabase] Lewati loadCentralData karena konfigurasi belum siap.');
+      return;
+    }
+
     try {
-      const [riwayatResult, uklResult, absensiResult] = await Promise.all([
-        supabase.from('riwayat').select('*').order('id', { ascending: true }),
-        supabase.from('riwayat_ukl').select('*').order('id', { ascending: true }),
-        supabase.from('riwayat_absensi_guru').select('*').order('id', { ascending: true })
+      const [riwayatRows, uklRows, absensiRows] = await Promise.all([
+        fetchSupabaseRows('riwayat'),
+        fetchSupabaseRows('riwayat_ukl'),
+        fetchSupabaseRows('riwayat_absensi_guru')
       ]);
 
-      const convertRows = (rows) => rows.map(row => mapKeys(row, toCamelCase));
+      const hasMissingRiwayatCoreFields = (row) => (
+        row?.pekan_label == null ||
+        row?.hadir == null ||
+        row?.jenis_setoran == null ||
+        row?.rincian_capaian == null ||
+        row?.predikat == null ||
+        row?.skor_adab == null ||
+        row?.skor_capaian == null ||
+        row?.total_skor_poin == null
+      );
 
-      const remoteRiwayat = (!riwayatResult.error && Array.isArray(riwayatResult.data)) ? convertRows(riwayatResult.data) : [];
-      const remoteUkl = (!uklResult.error && Array.isArray(uklResult.data)) ? convertRows(uklResult.data) : [];
-      const remoteAbsensi = (!absensiResult.error && Array.isArray(absensiResult.data)) ? convertRows(absensiResult.data) : [];
+      const rowsToRepair = riwayatRows
+        .filter((row) => hasMissingRiwayatCoreFields(row) && !repairedRiwayatIdsRef.current.has(row.id))
+        .slice(0, 50);
 
-      if (!riwayatResult.error) {
-        setRiwayat(await mergeRemoteAndLocal(remoteRiwayat, riwayat, 'riwayat'));
-      }
-      if (!uklResult.error) {
-        setRiwayatUkl(await mergeRemoteAndLocal(remoteUkl, riwayatUkl, 'riwayat_ukl'));
-      }
-      if (!absensiResult.error) {
-        setRiwayatAbsensiGuru(await mergeRemoteAndLocal(remoteAbsensi, riwayatAbsensiGuru, 'riwayat_absensi_guru'));
+      if (rowsToRepair.length > 0) {
+        await Promise.all(rowsToRepair.map(async (row) => {
+          const normalized = deserializeSupabaseRow('riwayat', row);
+          const repairedRow = {
+            ...normalized,
+            pekanLabel: normalized.pekanLabel || 'Pekan 1',
+          };
+          const repaired = await upsertSupabaseRow('riwayat', repairedRow);
+          if (repaired) {
+            repairedRiwayatIdsRef.current.add(row.id);
+          }
+        }));
       }
 
-      handleSupabaseError(riwayatResult.error, 'load riwayat');
-      handleSupabaseError(uklResult.error, 'load riwayat_ukl');
-      handleSupabaseError(absensiResult.error, 'load riwayat_absensi_guru');
+      const convertRows = (rows, tableName) => rows.map(row => deserializeSupabaseRow(tableName, row));
+
+      const remoteRiwayat = convertRows(riwayatRows, 'riwayat');
+      const remoteUkl = convertRows(uklRows, 'riwayat_ukl');
+      const remoteAbsensi = convertRows(absensiRows, 'riwayat_absensi_guru');
+
+      setRiwayat(remoteRiwayat);
+      setRiwayatUkl(remoteUkl);
+      setRiwayatAbsensiGuru(remoteAbsensi);
     } catch (error) {
       console.error('[Supabase:loadCentralData]', error);
     }
   };
 
   const subscribeToRealtime = () => {
+    if (!supabase || !supabaseConfig.isConfigured) {
+      return () => {};
+    }
+
     const channels = [];
     const subscribed = { ref: new Set() };
     const tables = [
@@ -603,7 +726,7 @@ export default function App() {
             if (event === 'INSERT' || event === 'UPDATE') {
               const newRow = payload.new ?? payload.record ?? null;
               if (!newRow) return;
-              const camel = mapKeys(newRow, toCamelCase);
+              const camel = deserializeSupabaseRow(table, newRow);
               setter(prev => {
                 const exists = prev.some(r => r.id === camel.id);
                 if (exists) return prev.map(r => r.id === camel.id ? camel : r);
@@ -636,15 +759,39 @@ export default function App() {
 
   useEffect(() => {
     let cleanup = null;
+    let poller = null;
+
     (async () => {
       await loadCentralData();
       cleanup = subscribeToRealtime();
     })();
 
+    const syncWhenVisible = () => {
+      loadCentralData();
+    };
+
+    if (typeof window !== 'undefined') {
+      poller = window.setInterval(() => {
+        loadCentralData();
+      }, 10000);
+      window.addEventListener('focus', syncWhenVisible);
+      document.addEventListener('visibilitychange', syncWhenVisible);
+    }
+
     return () => {
       if (typeof cleanup === 'function') cleanup();
+      if (poller) window.clearInterval(poller);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', syncWhenVisible);
+        document.removeEventListener('visibilitychange', syncWhenVisible);
+      }
     };
   }, []);
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    loadCentralData();
+  }, [isLoggedIn, currentUser?.userId]);
 
   const handleExportExcel = () => {
     if (currentUser.role !== 'admin') {
@@ -675,56 +822,71 @@ export default function App() {
       <body>
     `;
 
-    const pekanList = [...new Set(riwayat.map(i => i.pekanLabel || getPekanLabel(i.tanggal)))];
+    const sortedRiwayat = [...riwayat].sort((a, b) => String(a.tanggal || '').localeCompare(String(b.tanggal || '')));
+    const monthGroups = sortedRiwayat.reduce((acc, item) => {
+      const monthKey = String(item.tanggal || '').slice(0, 7) || 'tanpa-bulan';
+      if (!acc[monthKey]) acc[monthKey] = [];
+      acc[monthKey].push(item);
+      return acc;
+    }, {});
 
-    pekanList.forEach(pekanName => {
-      const pekanItems = riwayat.filter(i => (i.pekanLabel || getPekanLabel(i.tanggal)) === pekanName);
-      if (pekanItems.length === 0) return;
+    Object.keys(monthGroups).sort().forEach((monthKey) => {
+      const monthItems = monthGroups[monthKey];
+      if (monthItems.length === 0) return;
 
       html += `<div class="title-main">Rekapan Pekanan/Bulanan Tahfidz ${schoolProfile.nama}</div>`;
-      html += `<div class="title-pekan">${pekanName}</div>`;
+      html += `<div class="title-pekan">Bulan: ${getMonthLabel(monthItems[0]?.tanggal)}</div>`;
 
-      const halaqohListInPekan = [...new Set(pekanItems.map(i => i.halaqoh))];
+      const pekanList = [...new Set(monthItems.map(i => i.pekanLabel || getPekanLabel(i.tanggal)))];
 
-      halaqohListInPekan.forEach(halaqohName => {
-        const items = pekanItems.filter(i => i.halaqoh === halaqohName);
-        if (items.length === 0) return;
+      pekanList.forEach((pekanName) => {
+        const pekanItems = monthItems.filter(i => (i.pekanLabel || getPekanLabel(i.tanggal)) === pekanName);
+        if (pekanItems.length === 0) return;
 
-        const pengampuName = manageGuruPengampu[halaqohName] || 'Ustadz/Ustadzah';
-        html += `<div class="title-halaqoh">${halaqohName} — Pengampu: ${pengampuName}</div>`;
+        html += `<div class="title-pekan">${pekanName}</div>`;
 
-        html += `
-          <table>
-            <tr>
-              <th class="center" style="width: 50px;">No</th>
-              <th class="left" style="width: 220px;">Nama Murid</th>
-              <th class="left" style="width: 130px;">Tgl</th>
-              <th class="left" style="width: 90px;">Hari</th>
-              <th class="left" style="width: 110px;">Kehadiran</th>
-              <th class="left" style="width: 220px;">Jenis Setoran</th>
-              <th class="left" style="width: 450px;">Rincian Capaian</th>
-              <th class="left" style="width: 160px;">Predikat</th>
-              <th class="left" style="width: 100px;">Skor Adab</th>
-            </tr>
-        `;
+        const halaqohListInPekan = [...new Set(pekanItems.map(i => i.halaqoh))];
 
-        items.forEach((item, idx) => {
+        halaqohListInPekan.forEach(halaqohName => {
+          const items = pekanItems.filter(i => i.halaqoh === halaqohName);
+          if (items.length === 0) return;
+
+          const pengampuName = manageGuruPengampu[halaqohName] || 'Ustadz/Ustadzah';
+          html += `<div class="title-halaqoh">${halaqohName} — Pengampu: ${pengampuName}</div>`;
+
           html += `
-            <tr>
-              <td class="center">${idx + 1}</td>
-              <td class="left bold">${item.namaAsli}</td>
-              <td class="left">${item.tanggal}</td>
-              <td class="left">${item.hari}</td>
-              <td class="left">${item.hadir}</td>
-              <td class="left">${item.jenisSetoran}</td>
-              <td class="left">${item.rincianCapaian}</td>
-              <td class="left">${item.predikat}</td>
-              <td class="left">${item.skorAdab}/10</td>
-            </tr>
+            <table>
+              <tr>
+                <th class="center" style="width: 50px;">No</th>
+                <th class="left" style="width: 220px;">Nama Murid</th>
+                <th class="left" style="width: 130px;">Tgl</th>
+                <th class="left" style="width: 90px;">Hari</th>
+                <th class="left" style="width: 110px;">Kehadiran</th>
+                <th class="left" style="width: 220px;">Jenis Setoran</th>
+                <th class="left" style="width: 450px;">Rincian Capaian</th>
+                <th class="left" style="width: 160px;">Predikat</th>
+                <th class="left" style="width: 100px;">Skor Adab</th>
+              </tr>
           `;
-        });
 
-        html += `</table><br>`;
+          items.forEach((item, idx) => {
+            html += `
+              <tr>
+                <td class="center">${idx + 1}</td>
+                <td class="left bold">${item.namaAsli}</td>
+                <td class="left">${formatDateDisplay(item.tanggal)}</td>
+                <td class="left">${item.hari}</td>
+                <td class="left">${item.hadir}</td>
+                <td class="left">${item.jenisSetoran}</td>
+                <td class="left">${item.rincianCapaian}</td>
+                <td class="left">${item.predikat}</td>
+                <td class="left">${item.skorAdab}/10</td>
+              </tr>
+            `;
+          });
+
+          html += `</table><br>`;
+        });
       });
     });
 
@@ -734,7 +896,8 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `rekap_mutabaah_bulanan_pekanan_${new Date().toISOString().split('T')[0]}.xls`;
+    const todayDownload = getTodayDateStr();
+    link.download = `rekap_mutabaah_bulanan_pekanan_${todayDownload}.xls`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -762,45 +925,75 @@ export default function App() {
           .left { text-align: left; }
           .bold { font-weight: bold; }
           .title-main { color: #004080; font-family: Arial, sans-serif; font-size: 15pt; font-weight: bold; margin-top: 30px; margin-bottom: 15px; }
+          .title-sub { color: #004080; font-family: Arial, sans-serif; font-size: 11pt; font-weight: bold; margin-top: 8px; margin-bottom: 8px; }
         </style>
       </head>
       <body>
         <div class="title-main">Rekap Absensi Pengampu Tahfidz ${schoolProfile.nama}</div>
-        <table>
-          <tr>
-            <th class="center" style="width: 50px;">No</th>
-            <th class="left" style="width: 200px;">Halaqoh</th>
-            <th class="left" style="width: 200px;">Nama Pengampu</th>
-            <th class="left" style="width: 130px;">Tgl</th>
-            <th class="left" style="width: 100px;">Hari</th>
-            <th class="left" style="width: 120px;">Pekan</th>
-            <th class="left" style="width: 120px;">Kehadiran</th>
-            <th class="left" style="width: 300px;">Keterangan</th>
-          </tr>
     `;
 
-    riwayatAbsensiGuru.forEach((item, idx) => {
-      html += `
-        <tr>
-          <td class="center">${idx + 1}</td>
-          <td class="left bold">${item.namaHalaqoh}</td>
-          <td class="left">${item.ustadz}</td>
-          <td class="left">${item.tanggal}</td>
-          <td class="left">${item.hari}</td>
-          <td class="left">${item.pekan}</td>
-          <td class="left">${item.kehadiran}</td>
-          <td class="left">${item.keterangan || '-'}</td>
-        </tr>
-      `;
+    const sortedAbsensi = [...riwayatAbsensiGuru].sort((a, b) => String(a.tanggal || '').localeCompare(String(b.tanggal || '')));
+    const monthGroups = sortedAbsensi.reduce((acc, item) => {
+      const monthKey = String(item.tanggal || '').slice(0, 7) || 'tanpa-bulan';
+      if (!acc[monthKey]) acc[monthKey] = [];
+      acc[monthKey].push(item);
+      return acc;
+    }, {});
+
+    Object.keys(monthGroups).sort().forEach((monthKey) => {
+      const monthItems = monthGroups[monthKey];
+      html += `<div class="title-sub">Bulan: ${getMonthLabel(monthItems[0]?.tanggal)}</div>`;
+
+      const pekanGroups = monthItems.reduce((acc, item) => {
+        const pekanName = item.pekan || getSimplePekan(item.tanggal);
+        if (!acc[pekanName]) acc[pekanName] = [];
+        acc[pekanName].push(item);
+        return acc;
+      }, {});
+
+      Object.keys(pekanGroups).forEach((pekanName) => {
+        html += `<div class="title-sub">${pekanName}</div>`;
+        html += `
+          <table>
+            <tr>
+              <th class="center" style="width: 50px;">No</th>
+              <th class="left" style="width: 200px;">Halaqoh</th>
+              <th class="left" style="width: 200px;">Nama Pengampu</th>
+              <th class="left" style="width: 130px;">Tgl</th>
+              <th class="left" style="width: 100px;">Hari</th>
+              <th class="left" style="width: 120px;">Pekan</th>
+              <th class="left" style="width: 120px;">Kehadiran</th>
+              <th class="left" style="width: 300px;">Keterangan</th>
+            </tr>
+        `;
+
+        pekanGroups[pekanName].forEach((item, idx) => {
+          html += `
+            <tr>
+              <td class="center">${idx + 1}</td>
+              <td class="left bold">${item.namaHalaqoh}</td>
+              <td class="left">${item.ustadz}</td>
+              <td class="left">${formatDateDisplay(item.tanggal)}</td>
+              <td class="left">${item.hari}</td>
+              <td class="left">${item.pekan || getSimplePekan(item.tanggal)}</td>
+              <td class="left">${item.kehadiran}</td>
+              <td class="left">${item.keterangan || '-'}</td>
+            </tr>
+          `;
+        });
+
+        html += `</table><br>`;
+      });
     });
 
-    html += `</table></body></html>`;
+    html += `</body></html>`;
 
     const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `rekap_absensi_pengampu_${new Date().toISOString().split('T')[0]}.xls`;
+    const todayDownload = getTodayDateStr();
+    link.download = `rekap_absensi_pengampu_${todayDownload}.xls`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -808,7 +1001,7 @@ export default function App() {
 
   const handleSendWhatsApp = (item) => {
     const pengampuName = manageGuruPengampu[item.halaqoh] || 'Ustadz/Ustadzah';
-    const message = `Bismillah\n\nBerikut adalah laporan Mutaba'ah Tahfidz ananda *${item.namaAsli}* (${item.halaqoh}) pada tanggal ${item.tanggal}:\n\n- Kehadiran: ${item.hadir}\n- Capaian: ${item.jenisSetoran} - ${item.rincianCapaian}\n- Predikat: ${item.predikat}\n- Skor Adab: ${item.skorAdab}/10\n${item.evaluasiBacaan?.catatan ? `- Catatan Guru: ${item.evaluasiBacaan.catatan}\n` : ''}\nPengampu: *${pengampuName}*\n\nJazakumullahu khairan katsiran.\n_${schoolProfile.nama}_`;
+    const message = `Bismillah\n\nBerikut adalah laporan Mutaba'ah Tahfidz ananda *${item.namaAsli}* (${item.halaqoh}) pada tanggal ${formatDateDisplay(item.tanggal)}:\n\n- Kehadiran: ${item.hadir}\n- Capaian: ${item.jenisSetoran} - ${item.rincianCapaian}\n- Predikat: ${item.predikat}\n- Skor Adab: ${item.skorAdab}/10\n${item.evaluasiBacaan?.catatan ? `- Catatan Guru: ${item.evaluasiBacaan.catatan}\n` : ''}\nPengampu: *${pengampuName}*\n\nJazakumullahu khairan katsiran.\n_${schoolProfile.nama}_`;
     const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
     window.open(url, '_blank');
   };
@@ -910,7 +1103,7 @@ export default function App() {
                 <p style="font-size: 13px; font-weight: bold; text-decoration: underline; margin: 0; color: #0f172a;">${u.penguji}</p>
               </div>
               <div style="text-align: center; width: 250px;">
-                <p style="font-size: 13px; font-weight: bold; margin: 0 0 50px 0; color: #334155;">${schoolProfile.alamat.split(',')[1] || 'Majalengka'}, ${u.tanggal}</p>
+                <p style="font-size: 13px; font-weight: bold; margin: 0 0 50px 0; color: #334155;">${schoolProfile.alamat.split(',')[1] || 'Majalengka'}, ${formatDateDisplay(u.tanggal)}</p>
                 <p style="font-size: 13px; font-weight: bold; text-decoration: underline; margin: 0; color: #0f172a;">Kepala Sekolah</p>
               </div>
             </div>
@@ -1111,7 +1304,7 @@ export default function App() {
             </tr>
             ${mRiwayat.map(item => `
               <tr>
-                <td>${item.tanggal}</td>
+                <td>${formatDateDisplay(item.tanggal)}</td>
                 <td><b>${item.jenisSetoran}</b></td>
                 <td>${item.rincianCapaian}</td>
                 <td>${item.predikat}</td>
@@ -1131,7 +1324,7 @@ export default function App() {
             </tr>
             ${mUkl.map(u => `
               <tr>
-                <td>${u.tanggal}</td>
+                <td>${formatDateDisplay(u.tanggal)}</td>
                 <td><b>${u.jenisUjian}</b></td>
                 <td>${u.materiUjian}</td>
                 <td><b>${u.hasilUjian}</b></td>
@@ -1259,12 +1452,13 @@ export default function App() {
   const initH = getInitialHari();
   const firstHalaqohKey = Object.keys(manageHalaqohData)[0] || 'Halaqoh Tsuroyya';
   const firstMuridKey = manageHalaqohData[firstHalaqohKey]?.[0] || '';
+  const initialFormDate = getTodayDateStr();
 
   const [formData, setFormData] = useState({
     namaHalaqoh: firstHalaqohKey,
     namaAnak: firstMuridKey,
     ustadz: manageGuruPengampu[firstHalaqohKey] || '',
-    tanggal: getTanggalByHari(initH),
+    tanggal: initialFormDate,
     hari: initH,
     kehadiran: 'Hadir',
     
@@ -1310,20 +1504,30 @@ export default function App() {
     jenisUjian: 'Kenaikan Jilid Tamhidi',
     materiUjian: 'Tamhidi Jilid 1',
     penguji: manageGuruPengampu[firstHalaqohKey] || '',
-    tanggal: getTanggalByHari(initH),
+    tanggal: initialFormDate,
     hasilUjian: 'Lulus (Naik Level)',
     catatanUjian: '',
   });
 
+  const initialAbsensiDate = getTodayDateStr();
+
   const [absensiGuruData, setAbsensiGuruData] = useState({
     namaHalaqoh: firstHalaqohKey,
     ustadz: manageGuruPengampu[firstHalaqohKey] || '',
-    tanggal: getTanggalByHari(initH),
+    tanggal: initialAbsensiDate,
     hari: initH,
-    pekan: 'Pekan 1',
+    pekan: getSimplePekan(initialAbsensiDate),
     kehadiran: 'Hadir',
     keterangan: ''
   });
+
+  useEffect(() => {
+    if (!['input', 'absensi-guru'].includes(activeMenu)) return;
+    const todayDate = getTodayDateStr();
+    const todayHari = getInitialHari();
+    setFormData(prev => ({ ...prev, tanggal: todayDate, hari: todayHari }));
+    setAbsensiGuruData(prev => ({ ...prev, tanggal: todayDate, hari: todayHari, pekan: getSimplePekan(todayDate) }));
+  }, [activeMenu]);
 
   const isTamhidi = formData.jenisSetoran === "Tamhidi";
   const isTasmiJuz = formData.jenisSetoran === "Tasmi' 1 Juz";
@@ -1345,6 +1549,10 @@ export default function App() {
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
+    if (name === 'tanggal') {
+      setFormData(prev => ({ ...prev, tanggal: value, hari: getHariByTanggal(value) }));
+      return;
+    }
     if (name === 'namaHalaqoh') {
       const muridPertama = manageHalaqohData[value]?.[0] || '';
       setFormData(prev => ({
@@ -1429,11 +1637,20 @@ export default function App() {
 
   const handleAbsensiGuruChange = (e) => {
     const { name, value } = e.target;
+    if (name === 'tanggal') {
+      setAbsensiGuruData(prev => ({
+        ...prev,
+        tanggal: value,
+        hari: getHariByTanggal(value),
+        pekan: getSimplePekan(value)
+      }));
+      return;
+    }
     if (name === 'namaHalaqoh') {
       setAbsensiGuruData(prev => ({ ...prev, namaHalaqoh: value, ustadz: manageGuruPengampu[value] || '' }));
     } else if (name === 'hari') {
       const autoTanggal = getTanggalByHari(value);
-      setAbsensiGuruData(prev => ({ ...prev, hari: value, tanggal: autoTanggal }));
+      setAbsensiGuruData(prev => ({ ...prev, hari: value, tanggal: autoTanggal, pekan: getSimplePekan(autoTanggal) }));
     } else {
       let processedVal = value;
       if (name === 'keterangan') {
@@ -1467,9 +1684,31 @@ export default function App() {
     }));
   };
 
-  const handleSubmit = (e) => {
+  const normalizeAyatRange = (start, end, maxLimit) => {
+    const parsedStart = Number.isFinite(Number(start)) ? Number(start) : 1;
+    const parsedEnd = Number.isFinite(Number(end)) ? Number(end) : 1;
+    const safeMax = Number.isFinite(Number(maxLimit)) ? Number(maxLimit) : 1;
+    const safeStart = Math.min(Math.max(parsedStart, 1), safeMax);
+    const safeEnd = Math.min(Math.max(parsedEnd, 1), safeMax);
+    return {
+      ayatMulai: Math.min(safeStart, safeEnd),
+      ayatSelesai: Math.max(safeStart, safeEnd),
+    };
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
+
+    const muridDiHalaqoh = manageHalaqohData[formData.namaHalaqoh]?.includes(formData.namaAnak);
+    if (!muridDiHalaqoh) {
+      alert('Nama murid tidak terdaftar pada halaqoh yang dipilih. Silakan pilih ulang halaqoh/nama murid agar tidak tertukar.');
+      return;
+    }
+
     const isHadir = formData.kehadiran === 'Hadir';
+    const currentMax = getMaxAyatCurrent();
+    const normalizedRange = normalizeAyatRange(formData.ayatMulai, formData.ayatSelesai, currentMax);
+    const normalizedRange2 = formData.adaSuratKedua ? normalizeAyatRange(formData.ayatMulai2, formData.ayatSelesai2, getMaxAyatSurat2()) : null;
 
     const totalAdab = isHadir ? [
       formData.datangTepatWaktu, formData.memakaiSongkok, formData.penampilanRapi, formData.menjawabSalam, 
@@ -1488,15 +1727,19 @@ export default function App() {
       if (isTidakSetoran) {
         rincianCapaian = `Hadir (Tanpa Setoran)${formData.catatanSetoran ? ` - Catatan/Alasan: ${formData.catatanSetoran}` : ''}`;
       } else if (isTamhidi) {
-        rincianCapaian = `${formData.namaTamhidi}, Halaman ${formData.ayatMulai}-${formData.ayatSelesai}`;
+        const safeRange = normalizeAyatRange(formData.ayatMulai, formData.ayatSelesai, currentMax);
+        rincianCapaian = `${formData.namaTamhidi}, Halaman ${safeRange.ayatMulai}-${safeRange.ayatSelesai}`;
       } else if (isTahsin) {
-        rincianCapaian = `${formData.namaSurat}, Ayat ${formData.ayatMulai}-${formData.ayatSelesai}`;
+        const safeRange = normalizeAyatRange(formData.ayatMulai, formData.ayatSelesai, currentMax);
+        rincianCapaian = `${formData.namaSurat}, Ayat ${safeRange.ayatMulai}-${safeRange.ayatSelesai}`;
       } else if (isTasmiJuz) {
         rincianCapaian = `${formData.namaJuz} (Full 1 Juz)`;
       } else {
-        rincianCapaian = `${formData.namaSurat}, Ayat ${formData.ayatMulai}-${formData.ayatSelesai}`;
+        const safeRange = normalizeAyatRange(formData.ayatMulai, formData.ayatSelesai, currentMax);
+        rincianCapaian = `${formData.namaSurat}, Ayat ${safeRange.ayatMulai}-${safeRange.ayatSelesai}`;
         if (formData.adaSuratKedua && formData.namaSurat2) {
-          rincianCapaian += ` & Pindah ke ${formData.namaSurat2}, Ayat ${formData.ayatMulai2}-${formData.ayatSelesai2}`;
+          const safeRange2 = normalizeAyatRange(formData.ayatMulai2, formData.ayatSelesai2, getMaxAyatSurat2());
+          rincianCapaian += ` & Pindah ke ${formData.namaSurat2}, Ayat ${safeRange2.ayatMulai}-${safeRange2.ayatSelesai}`;
         }
       }
     } else {
@@ -1504,7 +1747,7 @@ export default function App() {
     }
 
     const payloadItem = {
-      id: editingId ? editingId : Date.now(),
+      id: editingId ? editingId : createRecordId(),
       namaAnak: formData.namaAnak.trim().toLowerCase(),
       namaAsli: formData.namaAnak.trim(),
       halaqoh: formData.namaHalaqoh,
@@ -1528,24 +1771,31 @@ export default function App() {
       updatedBy: getCurrentUserId(),
     };
 
+    const saved = await upsertSupabaseRow('riwayat', payloadItem);
+    if (!saved) {
+      alert('Data mutabaah gagal disimpan ke database pusat. Periksa koneksi lalu coba lagi.');
+      return;
+    }
+
     if (editingId) {
-      setRiwayat(riwayat.map(item => item.id === editingId ? payloadItem : item));
+      setRiwayat(prev => prev.map(item => item.id === editingId ? payloadItem : item));
       setEditingId(null);
       alert('Data mutabaah berhasil diperbarui/dikoreksi!');
     } else {
-      setRiwayat([...riwayat, payloadItem]);
+      setRiwayat(prev => [...prev, payloadItem]);
       alert('Data mutabaah berhasil disimpan!');
     }
 
-    upsertSupabaseRow('riwayat', payloadItem);
+    await loadCentralData();
 
     const targetHalaqoh = currentUser.role === 'guru' ? currentUser.halaqoh : firstHalaqohKey;
     const defaultH = getInitialHari();
+    const todayDate = getTodayDateStr();
     setFormData({
       namaHalaqoh: targetHalaqoh,
       namaAnak: manageHalaqohData[targetHalaqoh]?.[0] || '',
       ustadz: manageGuruPengampu[targetHalaqoh] || '',
-      tanggal: getTanggalByHari(defaultH),
+      tanggal: todayDate,
       hari: defaultH,
       kehadiran: 'Hadir',
       
@@ -1590,10 +1840,17 @@ export default function App() {
     });
   };
 
-  const handleUklSubmit = (e) => {
+  const handleUklSubmit = async (e) => {
     e.preventDefault();
+
+    const muridDiHalaqoh = manageHalaqohData[uklData.namaHalaqoh]?.includes(uklData.namaAnak);
+    if (!muridDiHalaqoh) {
+      alert('Nama murid UKL tidak terdaftar pada halaqoh yang dipilih. Silakan pilih ulang agar data tidak tertukar.');
+      return;
+    }
+
     const uklItem = {
-      id: Date.now(),
+      id: createRecordId(),
       namaKey: uklData.namaAnak.trim().toLowerCase(),
       namaAsli: uklData.namaAnak.trim(),
       ...uklData,
@@ -1601,17 +1858,24 @@ export default function App() {
       updatedBy: getCurrentUserId()
     };
 
-    setRiwayatUkl([...riwayatUkl, uklItem]);
-    upsertSupabaseRow('riwayat_ukl', uklItem);
+    const saved = await upsertSupabaseRow('riwayat_ukl', uklItem);
+    if (!saved) {
+      alert('Data UKL gagal disimpan ke database pusat. Periksa koneksi lalu coba lagi.');
+      return;
+    }
+
+    setRiwayatUkl(prev => [...prev, uklItem]);
+    await loadCentralData();
 
     const defaultH = getInitialHari();
+    const todayDate = getTodayDateStr();
     setUklData({
       namaHalaqoh: firstHalaqohKey,
       namaAnak: manageHalaqohData[firstHalaqohKey]?.[0] || '',
       jenisUjian: 'Kenaikan Jilid Tamhidi',
       materiUjian: 'Tamhidi Jilid 1',
       penguji: manageGuruPengampu[firstHalaqohKey] || '',
-      tanggal: getTanggalByHari(defaultH),
+      tanggal: todayDate,
       hasilUjian: 'Lulus (Naik Level)',
       catatanUjian: '',
     });
@@ -1624,24 +1888,33 @@ export default function App() {
     alert('Data Ujian Kenaikan Level berhasil disimpan! Sertifikat kelulusan kini tersedia untuk diunduh.');
   };
 
-  const handleAbsensiGuruSubmit = (e) => {
+  const handleAbsensiGuruSubmit = async (e) => {
     e.preventDefault();
     const absensiItem = {
-      id: Date.now(),
-      ...absensiGuruData
+      id: createRecordId(),
+      ...absensiGuruData,
+      createdBy: getCurrentUserId(),
+      updatedBy: getCurrentUserId()
     };
 
-    setRiwayatAbsensiGuru([...riwayatAbsensiGuru, absensiItem]);
-    upsertSupabaseRow('riwayat_absensi_guru', absensiItem);
+    const saved = await upsertSupabaseRow('riwayat_absensi_guru', absensiItem);
+    if (!saved) {
+      alert('Data absensi pengampu gagal disimpan ke database pusat. Periksa koneksi lalu coba lagi.');
+      return;
+    }
+
+    setRiwayatAbsensiGuru(prev => [...prev, absensiItem]);
+    await loadCentralData();
 
     const defaultHalaqoh = currentUser.role === 'guru' ? currentUser.halaqoh : firstHalaqohKey;
     const defaultH = getInitialHari();
+    const todayDate = getTodayDateStr();
     setAbsensiGuruData({
       namaHalaqoh: defaultHalaqoh,
       ustadz: manageGuruPengampu[defaultHalaqoh] || '',
-      tanggal: getTanggalByHari(defaultH),
+      tanggal: todayDate,
       hari: defaultH,
-      pekan: 'Pekan 1',
+      pekan: getSimplePekan(todayDate),
       kehadiran: 'Hadir',
       keterangan: ''
     });
@@ -1653,6 +1926,23 @@ export default function App() {
     });
     alert('Data absensi pengampu berhasil disimpan!');
   };
+
+  const isLegacyPlaceholderRow = (item) =>
+    item?.hadir === '-' &&
+    item?.jenisSetoran === '-' &&
+    item?.rincianCapaian === '-' &&
+    item?.predikat === '-' &&
+    Number(item?.skorAdab ?? 0) === 0 &&
+    Number(item?.skorCapaian ?? 0) === 0 &&
+    Number(item?.totalSkorPoin ?? 0) === 0;
+
+  const scopedRiwayat = riwayat.filter((item) => {
+    if (currentUser?.role === 'guru') {
+      if (isLegacyPlaceholderRow(item)) return false;
+      return item.halaqoh === currentUser?.halaqoh;
+    }
+    return true;
+  });
 
   const totalMuridSemua = Object.values(manageHalaqohData).reduce((acc, list) => acc + list.length, 0);
   const totalPengampuSemua = Object.keys(manageGuruPengampu).length;
@@ -1672,12 +1962,25 @@ export default function App() {
     }).sort((a, b) => b.totalPoin - a.totalPoin);
   };
 
-  const todayRiwayat = riwayat.filter(i => i.tanggal === todayDateStr);
+  const todayRiwayat = scopedRiwayat.filter(i => i.tanggal === todayDateStr);
   const leaderboardToday = computeLeaderboard(todayRiwayat);
-  const leaderboardAllTime = computeLeaderboard(riwayat);
+  const leaderboardAllTime = computeLeaderboard(scopedRiwayat);
 
-  const selectedMuridData = leaderboardAllTime.find(m => m.namaKey === searchOrangTua.trim().toLowerCase());
-  const peringkatMurid = selectedMuridData ? leaderboardAllTime.findIndex(m => m.namaKey === selectedMuridData.namaKey) + 1 : 0;
+  const filteredPortalRiwayat = riwayat.filter((item) => {
+    if (portalPeriodeFilter === 'hari' && portalFilterHari) return item.hari === portalFilterHari;
+    if (portalPeriodeFilter === 'tanggal' && portalFilterTanggal) return item.tanggal === portalFilterTanggal;
+    if (portalPeriodeFilter === 'pekan' && portalFilterPekan) {
+      const pekanLabel = item.pekanLabel || getPekanLabel(item.tanggal);
+      return pekanLabel.includes(portalFilterPekan);
+    }
+    if (portalPeriodeFilter === 'bulan' && portalFilterBulan) return String(item.tanggal || '').startsWith(portalFilterBulan);
+    return true;
+  });
+
+  const leaderboardPortalToday = computeLeaderboard(riwayat.filter(i => i.tanggal === todayDateStr));
+  const leaderboardPortalAllTime = computeLeaderboard(filteredPortalRiwayat);
+  const selectedMuridData = leaderboardPortalAllTime.find(m => m.namaKey === searchOrangTua.trim().toLowerCase());
+  const peringkatMurid = selectedMuridData ? leaderboardPortalAllTime.findIndex(m => m.namaKey === selectedMuridData.namaKey) + 1 : 0;
 
   const semuaSiswaList = Object.entries(manageHalaqohData).flatMap(([namaHalaqoh, muridList]) => 
     muridList.map(namaMurid => ({
@@ -1699,12 +2002,47 @@ export default function App() {
   );
 
   const halaqohChartStats = Object.keys(manageHalaqohData).map(hName => {
-    const itemsInH = riwayat.filter(i => i.halaqoh === hName);
+    const itemsInH = scopedRiwayat.filter(i => i.halaqoh === hName);
     const totalPts = itemsInH.reduce((acc, curr) => acc + curr.totalSkorPoin, 0);
     const totalHadirCount = itemsInH.filter(i => i.hadir === 'Hadir').length;
     return { halaqohName: hName, totalPts, totalHadirCount };
   });
   const maxPtsGraph = Math.max(...halaqohChartStats.map(s => s.totalPts), 30);
+
+  const portalRecapByStudent = semuaSiswaList
+    .map((siswa) => {
+      const sRiwayat = filteredPortalRiwayat.filter(i => i.namaAnak === siswa.nama.toLowerCase());
+      const totalSesiAnak = sRiwayat.length;
+      const totalPoinAnak = sRiwayat.reduce((acc, curr) => acc + curr.totalSkorPoin, 0);
+      const totalSetoranAnak = sRiwayat.filter(i => i.jenisSetoran !== '-' && i.jenisSetoran !== 'Tidak Setoran (Hadir Saja)').length;
+      const avgAdab = totalSesiAnak > 0 ? (sRiwayat.reduce((a, c) => a + c.skorAdab, 0) / totalSesiAnak).toFixed(1) : '0';
+      return { siswa, totalSesiAnak, totalPoinAnak, totalSetoranAnak, avgAdab };
+    })
+    .sort((a, b) => {
+      if (b.totalSetoranAnak !== a.totalSetoranAnak) return b.totalSetoranAnak - a.totalSetoranAnak;
+      if (b.totalPoinAnak !== a.totalPoinAnak) return b.totalPoinAnak - a.totalPoinAnak;
+      return a.siswa.nama.localeCompare(b.siswa.nama);
+    });
+
+  const totalSesiTargetPortal = getTargetSesiByPeriode(portalPeriodeFilter);
+  const totalSesiAktualPortal = filteredPortalRiwayat.filter((item) => item.hadir === 'Hadir').length;
+  const persentaseSesiPortal = totalSesiTargetPortal > 0
+    ? Math.min(100, Math.round((totalSesiAktualPortal / totalSesiTargetPortal) * 100))
+    : 0;
+
+  const filteredAbsensiRiwayat = riwayatAbsensiGuru
+    .filter((item) => {
+      if (absensiHalaqohFilter !== 'Semua' && item.namaHalaqoh !== absensiHalaqohFilter) return false;
+      if (absensiPeriodeFilter === 'hari' && absensiFilterHari) return item.hari === absensiFilterHari;
+      if (absensiPeriodeFilter === 'tanggal' && absensiFilterTanggal) return item.tanggal === absensiFilterTanggal;
+      if (absensiPeriodeFilter === 'pekan' && absensiFilterPekan) {
+        const pekanValue = item.pekan || getSimplePekan(item.tanggal);
+        return pekanValue.includes(absensiFilterPekan);
+      }
+      if (absensiPeriodeFilter === 'bulan' && absensiFilterBulan) return String(item.tanggal || '').startsWith(absensiFilterBulan);
+      return true;
+    })
+    .sort((a, b) => String(b.tanggal || '').localeCompare(String(a.tanggal || '')));
 
   if (!isLoggedIn) {
     return (
@@ -2389,7 +2727,7 @@ export default function App() {
                     </div>
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">Tgl (Otomatis)</label>
-                      <input type="date" name="tanggal" value={formData.tanggal} onChange={handleChange} className="w-full px-3 py-3.5 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 text-sm shadow-2xs" required />
+                      <input type="date" name="tanggal" value={formData.tanggal || initialFormDate} onChange={handleChange} className="w-full px-3 py-3.5 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 text-sm shadow-2xs" required />
                     </div>
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">Hari Tahfidz</label>
@@ -2397,7 +2735,10 @@ export default function App() {
                         <option value="Senin">Senin</option>
                         <option value="Selasa">Selasa</option>
                         <option value="Rabu">Rabu</option>
+                        <option value="Kamis">Kamis</option>
                         <option value="Jumat">Jumat</option>
+                        <option value="Sabtu">Sabtu</option>
+                        <option value="Minggu">Minggu</option>
                       </select>
                     </div>
                     <div>
@@ -2502,7 +2843,7 @@ export default function App() {
                             <div className="md:col-span-3 pt-1">
                               <label className="flex items-center gap-3 cursor-pointer bg-slate-50 p-3.5 rounded-xl border border-slate-200">
                                 <input type="checkbox" name="adaSuratKedua" checked={formData.adaSuratKedua} onChange={handleChange} className="w-5 h-5 text-blue-600 rounded" />
-                                <span className="font-bold text-slate-800 text-sm">Setoran lebih dari satu surat / Pindah surat pada sesi ini</span>
+                                <span className="font-bold text-slate-800 text-sm">Setoran lebih dari satu surat / sampai surat lanjutan pada sesi ini</span>
                               </label>
                             </div>
                           )}
@@ -2510,7 +2851,7 @@ export default function App() {
                           {formData.adaSuratKedua && !isTahsinOrTamhidi && (
                             <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-3.5 p-4 bg-blue-50/70 rounded-2xl border border-blue-200">
                               <div className="md:col-span-3">
-                                <label className="block font-semibold text-slate-700 mb-1">Surat Kedua / Lanjutan</label>
+                                <label className="block font-semibold text-slate-700 mb-1">Sampai Surat / Lanjutan</label>
                                 <select name="namaSurat2" value={formData.namaSurat2} onChange={handleChange} className="w-full p-3.5 pr-10 rounded-xl border border-slate-300 bg-white font-bold text-blue-600 shadow-2xs">
                                   {daftarSurat.map((s, idx) => <option key={idx} value={s}>{s} ({jumlahAyatSurah[s]} ayat)</option>)}
                                 </select>
@@ -2689,32 +3030,30 @@ export default function App() {
           )}
 
           {activeMenu === 'riwayat' && (() => {
-            const filteredRiwayat = riwayat.filter(item => {
-              if (currentUser.role === 'guru' && item.halaqoh !== currentUser.halaqoh) return false;
-              if (['admin', 'kepsek', 'kurikulum', 'kesiswaan'].includes(currentUser.role) && adminHalaqohFilter !== 'Semua' && item.halaqoh !== adminHalaqohFilter) return false;
-              
-              if (adminPeriodeFilter === 'hari' && adminFilterTanggal) {
-                if (item.tanggal !== adminFilterTanggal) return false;
-              }
-              if (adminPeriodeFilter === 'bulan' && adminFilterBulan) {
-                if (!item.tanggal.startsWith(adminFilterBulan)) return false;
-              }
-              return true;
-            });
+            const filteredRiwayat = filterRiwayatRows(
+              riwayat,
+              currentUser,
+              adminHalaqohFilter,
+              adminPeriodeFilter,
+              adminFilterHari,
+              adminFilterTanggal,
+              adminFilterPekan,
+              adminFilterBulan
+            );
 
             const halaqohGroups = Object.keys(manageHalaqohData).reduce((acc, hName) => {
               acc[hName] = filteredRiwayat.filter(item => item.halaqoh === hName);
               return acc;
             }, {});
 
-            const canFilter = ['admin', 'kepsek', 'kurikulum', 'kesiswaan'].includes(currentUser.role);
+            const canFilter = ['admin', 'guru', 'kepsek', 'kurikulum', 'kesiswaan'].includes(currentUser.role);
 
             return (
               <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/80 shadow-sm space-y-6">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 pb-5">
                   <div>
                     <h2 className="text-base font-bold text-slate-900">
-                      {currentUser.role === 'guru' ? `📂 Riwayat Aktivitas ${currentUser.halaqoh}` : '📂 Riwayat Pencapaian Harian & Rekapitulasi Halaqoh'}
+                      {currentUser.role === 'guru' ? '📂 Riwayat Aktivitas Semua Halaqoh' : '📂 Riwayat Pencapaian Harian & Rekapitulasi Halaqoh'}
                     </h2>
                     <p className="text-sm text-slate-500 mt-0.5">Kelompok halaqoh & filter rekapitulasi harian, pekan, dan bulan</p>
                   </div>
@@ -2748,7 +3087,19 @@ export default function App() {
                           onClick={() => setAdminPeriodeFilter('hari')}
                           className={`px-4 py-2 rounded-xl font-bold transition ${adminPeriodeFilter === 'hari' ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'}`}
                         >
+                          Berdasarkan Hari
+                        </button>
+                        <button 
+                          onClick={() => setAdminPeriodeFilter('tanggal')}
+                          className={`px-4 py-2 rounded-xl font-bold transition ${adminPeriodeFilter === 'tanggal' ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'}`}
+                        >
                           Berdasarkan Tanggal
+                        </button>
+                        <button 
+                          onClick={() => setAdminPeriodeFilter('pekan')}
+                          className={`px-4 py-2 rounded-xl font-bold transition ${adminPeriodeFilter === 'pekan' ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'}`}
+                        >
+                          Berdasarkan Pekan
                         </button>
                         <button 
                           onClick={() => setAdminPeriodeFilter('bulan')}
@@ -2761,6 +3112,26 @@ export default function App() {
 
                     {adminPeriodeFilter === 'hari' && (
                       <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-slate-200">
+                        <span className="font-semibold text-slate-700">Pilih Hari:</span>
+                        <select 
+                          value={adminFilterHari} 
+                          onChange={(e) => setAdminFilterHari(e.target.value)} 
+                          className="p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 shadow-2xs"
+                        >
+                          <option value="">Semua Hari</option>
+                          <option value="Senin">Senin</option>
+                          <option value="Selasa">Selasa</option>
+                          <option value="Rabu">Rabu</option>
+                          <option value="Kamis">Kamis</option>
+                          <option value="Jumat">Jumat</option>
+                          <option value="Sabtu">Sabtu</option>
+                          <option value="Minggu">Minggu</option>
+                        </select>
+                      </div>
+                    )}
+
+                    {adminPeriodeFilter === 'tanggal' && (
+                      <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-slate-200">
                         <span className="font-semibold text-slate-700">Pilih Tanggal:</span>
                         <input 
                           type="date" 
@@ -2771,6 +3142,23 @@ export default function App() {
                         {adminFilterTanggal && (
                           <button onClick={() => setAdminFilterTanggal('')} className="text-rose-600 font-bold hover:underline">Reset Tanggal</button>
                         )}
+                      </div>
+                    )}
+
+                    {adminPeriodeFilter === 'pekan' && (
+                      <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-slate-200">
+                        <span className="font-semibold text-slate-700">Pilih Pekan:</span>
+                        <select 
+                          value={adminFilterPekan} 
+                          onChange={(e) => setAdminFilterPekan(e.target.value)} 
+                          className="p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 shadow-2xs"
+                        >
+                          <option value="">Semua Pekan</option>
+                          <option value="Pekan 1">Pekan 1</option>
+                          <option value="Pekan 2">Pekan 2</option>
+                          <option value="Pekan 3">Pekan 3</option>
+                          <option value="Pekan 4">Pekan 4</option>
+                        </select>
                       </div>
                     )}
 
@@ -2860,7 +3248,7 @@ export default function App() {
                                     {pekanItems.map((item) => (
                                       <tr key={item.id} className="hover:bg-slate-50/80">
                                         <td className="p-3.5 align-middle font-bold text-slate-900 capitalize whitespace-nowrap">{item.namaAsli}</td>
-                                        <td className="p-3.5 align-middle text-slate-700 whitespace-nowrap"><div className="font-semibold">{item.tanggal}</div><div className="text-xs text-slate-400">({item.hari})</div></td>
+                                        <td className="p-3.5 align-middle text-slate-700 whitespace-nowrap"><div className="font-semibold">{formatDateDisplay(item.tanggal)}</div><div className="text-xs text-slate-400">({item.hari})</div></td>
                                         <td className="p-3.5 align-middle whitespace-nowrap"><span className="px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200">{item.hadir}</span></td>
                                         <td className="p-3.5 align-middle whitespace-nowrap"><span className="px-3 py-1.5 text-xs font-bold rounded-xl bg-slate-100 text-slate-800">{item.skorAdab}/10</span></td>
                                         <td className="p-3.5 align-middle text-slate-700"><span className="font-bold text-blue-700">{item.jenisSetoran}</span>: {item.rincianCapaian}</td>
@@ -2941,7 +3329,7 @@ export default function App() {
                                   <tr key={item.id} className="hover:bg-slate-50/80">
                                     <td className="p-3.5 align-middle font-bold text-slate-900 capitalize whitespace-nowrap">{item.namaAsli}</td>
                                     <td className="p-3.5 align-middle text-slate-700 capitalize whitespace-nowrap">{item.halaqoh}</td>
-                                    <td className="p-3.5 align-middle text-slate-700 whitespace-nowrap"><div className="font-semibold">{item.tanggal}</div><div className="text-xs text-slate-400">({item.hari})</div></td>
+                                    <td className="p-3.5 align-middle text-slate-700 whitespace-nowrap"><div className="font-semibold">{formatDateDisplay(item.tanggal)}</div><div className="text-xs text-slate-400">({item.hari})</div></td>
                                     <td className="p-3.5 align-middle whitespace-nowrap"><span className="px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200">{item.hadir}</span></td>
                                     <td className="p-3.5 align-middle whitespace-nowrap"><span className="px-3 py-1.5 text-xs font-bold rounded-xl bg-slate-100 text-slate-800">{item.skorAdab}/10</span></td>
                                     <td className="p-3.5 align-middle text-slate-700"><span className="font-bold text-blue-700">{item.jenisSetoran}</span>: {item.rincianCapaian}</td>
@@ -3081,7 +3469,7 @@ export default function App() {
                           </div>
                         </div>
                         <p className="text-slate-700"><b>{u.jenisUjian}:</b> {u.materiUjian}</p>
-                        <p className="text-xs text-slate-400">Penguji: {u.penguji} | Tanggal: {u.tanggal}</p>
+                        <p className="text-xs text-slate-400">Penguji: {u.penguji} | Tanggal: {formatDateDisplay(u.tanggal)}</p>
                       </div>
                     ))}
                   </div>
@@ -3386,7 +3774,7 @@ export default function App() {
                                   {selectedMuridData.dataMurid.map((item) => (
                                     <div key={item.id} className="p-4 bg-white rounded-xl border border-slate-200/80 text-sm space-y-1.5 shadow-2xs">
                                       <div className="flex justify-between items-center text-xs text-slate-500 font-medium">
-                                        <span>📅 {item.tanggal} ({item.hari})</span>
+                                        <span>📅 {formatDateDisplay(item.tanggal)} ({item.hari})</span>
                                         <span className="px-2.5 py-0.5 rounded-lg bg-emerald-50 text-emerald-700 font-bold border border-emerald-200">{item.hadir}</span>
                                       </div>
                                       <p className="text-slate-800 font-medium">
@@ -3418,18 +3806,28 @@ export default function App() {
                       </h3>
                       <span className="text-xs bg-emerald-50 text-emerald-700 px-3 py-1 rounded-xl font-bold">Tanggal: {todayFormatted}</span>
                     </div>
-                    {leaderboardToday.length === 0 ? (
+                    {leaderboardPortalToday.length === 0 ? (
                       <p className="text-slate-400 text-sm py-8 text-center italic">Belum ada aktivitas mutabaah yang tercatat pada hari ini. Data akan tereset otomatis setiap hari.</p>
                     ) : (
                       <div className="space-y-2.5">
-                        {leaderboardToday.slice(0, 15).map((m, idx) => (
+                        {leaderboardPortalToday.slice(0, 15).map((m, idx) => (
                           <div key={m.namaKey} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 bg-slate-50 hover:bg-slate-100 rounded-2xl border border-slate-200/70 text-sm gap-3 shadow-2xs">
                             <div className="flex items-center gap-3.5">
                               <span className={`w-8 h-8 flex items-center justify-center rounded-xl font-bold text-xs shrink-0 shadow-2xs ${idx === 0 ? 'bg-amber-400 text-amber-950 font-black' : idx === 1 ? 'bg-slate-300 text-slate-800 font-bold' : idx === 2 ? 'bg-amber-600 text-white font-bold' : 'bg-slate-200 text-slate-700'}`}>
                                 {idx === 0 ? '🥇 1' : idx === 1 ? '🥈 2' : idx === 2 ? '🥉 3' : `#${idx + 1}`}
                               </span>
                               <div>
-                                <span className="font-bold text-slate-900 capitalize block">{m.namaAsli}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSearchOrangTua(m.namaAsli);
+                                    setShowSuggestions(false);
+                                  }}
+                                  className="font-bold text-slate-900 capitalize block hover:text-blue-700 hover:underline text-left"
+                                  title="Lihat detail capaian murid"
+                                >
+                                  {m.namaAsli}
+                                </button>
                                 <span className="text-xs text-slate-500 font-medium">{m.halaqohAnak}</span>
                               </div>
                             </div>
@@ -3450,6 +3848,46 @@ export default function App() {
                     <p className="text-sm text-slate-500 mt-0.5">Analisis komprehensif perkembangan hafalan, nilai adab, dan grafik pencapaian seluruh murid secara mendalam.</p>
                   </div>
 
+                  <div className="bg-slate-50 p-4 sm:p-5 rounded-2xl border border-slate-200/80 space-y-3">
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => setPortalPeriodeFilter('hari')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${portalPeriodeFilter === 'hari' ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 border border-slate-300'}`}>Hari</button>
+                      <button onClick={() => setPortalPeriodeFilter('tanggal')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${portalPeriodeFilter === 'tanggal' ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 border border-slate-300'}`}>Tanggal</button>
+                      <button onClick={() => setPortalPeriodeFilter('pekan')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${portalPeriodeFilter === 'pekan' ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 border border-slate-300'}`}>Pekan</button>
+                      <button onClick={() => setPortalPeriodeFilter('bulan')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${portalPeriodeFilter === 'bulan' ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 border border-slate-300'}`}>Bulan</button>
+                    </div>
+
+                    {portalPeriodeFilter === 'hari' && (
+                      <select value={portalFilterHari} onChange={(e) => setPortalFilterHari(e.target.value)} className="p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 text-sm shadow-2xs">
+                        <option value="">Semua Hari</option>
+                        <option value="Senin">Senin</option>
+                        <option value="Selasa">Selasa</option>
+                        <option value="Rabu">Rabu</option>
+                        <option value="Kamis">Kamis</option>
+                        <option value="Jumat">Jumat</option>
+                        <option value="Sabtu">Sabtu</option>
+                        <option value="Minggu">Minggu</option>
+                      </select>
+                    )}
+
+                    {portalPeriodeFilter === 'tanggal' && (
+                      <input type="date" value={portalFilterTanggal} onChange={(e) => setPortalFilterTanggal(e.target.value)} className="p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 text-sm shadow-2xs" />
+                    )}
+
+                    {portalPeriodeFilter === 'pekan' && (
+                      <select value={portalFilterPekan} onChange={(e) => setPortalFilterPekan(e.target.value)} className="p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 text-sm shadow-2xs">
+                        <option value="">Semua Pekan</option>
+                        <option value="Pekan 1">Pekan 1</option>
+                        <option value="Pekan 2">Pekan 2</option>
+                        <option value="Pekan 3">Pekan 3</option>
+                        <option value="Pekan 4">Pekan 4</option>
+                      </select>
+                    )}
+
+                    {portalPeriodeFilter === 'bulan' && (
+                      <input type="month" value={portalFilterBulan} onChange={(e) => setPortalFilterBulan(e.target.value)} className="p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 text-sm shadow-2xs" />
+                    )}
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="p-5 bg-blue-50/70 rounded-2xl border border-blue-200 space-y-2 shadow-2xs">
                       <span className="text-xs font-bold text-blue-800 uppercase tracking-wider block">Total Murid Aktif</span>
@@ -3458,13 +3896,14 @@ export default function App() {
                     </div>
                     <div className="p-5 bg-emerald-50/70 rounded-2xl border border-emerald-200 space-y-2 shadow-2xs">
                       <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider block">Total Sesi Pembelajaran</span>
-                      <span className="text-3xl font-extrabold text-emerald-900">{riwayat.length} Sesi</span>
-                      <p className="text-xs text-slate-600">Pencatatan harian terekam secara otomatis.</p>
+                      <span className="text-3xl font-extrabold text-emerald-900">{totalSesiTargetPortal} Sesi</span>
+                      <p className="text-xs text-slate-600">Target sesi sesuai periode tahfidz: harian 1, pekanan 4, bulanan 16.</p>
+                      <p className="text-xs font-bold text-emerald-800">Indikator: Realisasi {totalSesiAktualPortal}/{totalSesiTargetPortal} sesi ({persentaseSesiPortal}%)</p>
                     </div>
                     <div className="p-5 bg-amber-50/70 rounded-2xl border border-amber-200 space-y-2 shadow-2xs">
                       <span className="text-xs font-bold text-amber-800 uppercase tracking-wider block">Rata-rata Skor Keseluruhan</span>
                       <span className="text-3xl font-extrabold text-amber-900">
-                        {riwayat.length > 0 ? (riwayat.reduce((a, c) => a + c.skorAdab, 0) / riwayat.length).toFixed(1) : '0'} <span className="text-sm font-normal">/ 10</span>
+                        {filteredPortalRiwayat.length > 0 ? (filteredPortalRiwayat.reduce((a, c) => a + c.skorAdab, 0) / filteredPortalRiwayat.length).toFixed(1) : '0'} <span className="text-sm font-normal">/ 10</span>
                       </span>
                       <p className="text-xs text-slate-600">Predikat adab dan kedisiplinan murid.</p>
                     </div>
@@ -3473,11 +3912,7 @@ export default function App() {
                   <div className="space-y-4 pt-2">
                     <h4 className="font-bold text-slate-900 text-sm border-b border-slate-100 pb-2">📋 Daftar Rekapitulasi Perkembangan Seluruh Murid</h4>
                     <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
-                      {semuaSiswaList.map((siswa, idx) => {
-                        const sRiwayat = riwayat.filter(i => i.namaAnak === siswa.nama.toLowerCase());
-                        const totalSesiAnak = sRiwayat.length;
-                        const totalPoinAnak = sRiwayat.reduce((acc, curr) => acc + curr.totalSkorPoin, 0);
-                        const avgAdab = totalSesiAnak > 0 ? (sRiwayat.reduce((a, c) => a + c.skorAdab, 0) / totalSesiAnak).toFixed(1) : '0';
+                      {portalRecapByStudent.map(({ siswa, totalSesiAnak, totalPoinAnak, totalSetoranAnak, avgAdab }, idx) => {
 
                         return (
                           <div key={idx} className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 text-sm shadow-2xs">
@@ -3487,6 +3922,7 @@ export default function App() {
                             </div>
                             <div className="flex items-center gap-3 text-xs self-end sm:self-auto font-medium flex-wrap">
                               <span className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">Sesi: <b className="text-slate-900">{totalSesiAnak}</b></span>
+                              <span className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">Setoran: <b className="text-blue-700">{totalSetoranAnak}</b></span>
                               <span className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">Rata Adab: <b className="text-emerald-700">{avgAdab}/10</b></span>
                               <span className="bg-blue-600 text-white px-3.5 py-1.5 rounded-xl font-bold shadow-xs">Total Poin: {totalPoinAnak}</span>
                             </div>
@@ -3533,7 +3969,7 @@ export default function App() {
                       </div>
                       <div>
                         <label className="block font-semibold text-slate-700 mb-1">Tanggal (Auto)</label>
-                        <input type="text" value={absensiGuruData.tanggal} readOnly className="w-full p-3.5 rounded-xl border border-slate-300 bg-slate-100 font-bold text-slate-800 shadow-2xs" />
+                        <input type="date" name="tanggal" value={absensiGuruData.tanggal || initialAbsensiDate} onChange={handleAbsensiGuruChange} className="w-full p-3.5 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 shadow-2xs" />
                       </div>
                       <div>
                         <label className="block font-semibold text-slate-700 mb-1">Hari Tahfidz</label>
@@ -3541,7 +3977,10 @@ export default function App() {
                           <option value="Senin">Senin</option>
                           <option value="Selasa">Selasa</option>
                           <option value="Rabu">Rabu</option>
+                          <option value="Kamis">Kamis</option>
                           <option value="Jumat">Jumat</option>
+                          <option value="Sabtu">Sabtu</option>
+                          <option value="Minggu">Minggu</option>
                         </select>
                       </div>
                     </div>
@@ -3582,11 +4021,63 @@ export default function App() {
                     </button>
                   )}
                 </div>
-                {riwayatAbsensiGuru.length === 0 ? (
+
+                <div className="bg-slate-50 p-4 sm:p-5 rounded-2xl border border-slate-200/80 space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    <button onClick={() => setAbsensiPeriodeFilter('semua')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${absensiPeriodeFilter === 'semua' ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 border border-slate-300'}`}>Semua</button>
+                    <button onClick={() => setAbsensiPeriodeFilter('hari')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${absensiPeriodeFilter === 'hari' ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 border border-slate-300'}`}>Hari</button>
+                    <button onClick={() => setAbsensiPeriodeFilter('tanggal')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${absensiPeriodeFilter === 'tanggal' ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 border border-slate-300'}`}>Tanggal</button>
+                    <button onClick={() => setAbsensiPeriodeFilter('pekan')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${absensiPeriodeFilter === 'pekan' ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 border border-slate-300'}`}>Pekan</button>
+                    <button onClick={() => setAbsensiPeriodeFilter('bulan')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${absensiPeriodeFilter === 'bulan' ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 border border-slate-300'}`}>Bulan</button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3 items-center">
+                    <span className="text-xs font-semibold text-slate-700">Halaqoh:</span>
+                    <select value={absensiHalaqohFilter} onChange={(e) => setAbsensiHalaqohFilter(e.target.value)} className="p-2.5 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 text-xs shadow-2xs">
+                      <option value="Semua">Semua Halaqoh</option>
+                      {Object.keys(manageHalaqohData).map((hName) => (
+                        <option key={hName} value={hName}>{hName}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {absensiPeriodeFilter === 'hari' && (
+                    <select value={absensiFilterHari} onChange={(e) => setAbsensiFilterHari(e.target.value)} className="p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 text-sm shadow-2xs">
+                      <option value="">Semua Hari</option>
+                      <option value="Senin">Senin</option>
+                      <option value="Selasa">Selasa</option>
+                      <option value="Rabu">Rabu</option>
+                      <option value="Kamis">Kamis</option>
+                      <option value="Jumat">Jumat</option>
+                      <option value="Sabtu">Sabtu</option>
+                      <option value="Minggu">Minggu</option>
+                    </select>
+                  )}
+
+                  {absensiPeriodeFilter === 'tanggal' && (
+                    <input type="date" value={absensiFilterTanggal} onChange={(e) => setAbsensiFilterTanggal(e.target.value)} className="p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 text-sm shadow-2xs" />
+                  )}
+
+                  {absensiPeriodeFilter === 'pekan' && (
+                    <select value={absensiFilterPekan} onChange={(e) => setAbsensiFilterPekan(e.target.value)} className="p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 text-sm shadow-2xs">
+                      <option value="">Semua Pekan</option>
+                      <option value="Pekan 1">Pekan 1</option>
+                      <option value="Pekan 2">Pekan 2</option>
+                      <option value="Pekan 3">Pekan 3</option>
+                      <option value="Pekan 4">Pekan 4</option>
+                    </select>
+                  )}
+
+                  {absensiPeriodeFilter === 'bulan' && (
+                    <input type="month" value={absensiFilterBulan} onChange={(e) => setAbsensiFilterBulan(e.target.value)} className="p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 text-sm shadow-2xs" />
+                  )}
+                </div>
+
+                {filteredAbsensiRiwayat.length === 0 ? (
                   <p className="text-slate-400 text-sm py-10 text-center italic bg-slate-50 rounded-2xl border border-slate-100">Belum ada data absensi pengampu.</p>
                 ) : (
                   <div className="space-y-3.5 text-sm">
-                    {riwayatAbsensiGuru.map(item => (
+                    {filteredAbsensiRiwayat.map(item => (
                       <div key={item.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-1.5 shadow-2xs">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 font-bold text-slate-900">
                           <span>{item.ustadz} <span className="text-xs text-slate-500 font-normal">({item.namaHalaqoh})</span></span>
@@ -3603,7 +4094,7 @@ export default function App() {
                         </div>
                         <p className="text-slate-700"><b>{item.hari} • {item.pekan}</b></p>
                         {item.keterangan && <p className="text-slate-500 italic">"{item.keterangan}"</p>}
-                        <p className="text-xs text-slate-400">Tanggal: {item.tanggal}</p>
+                        <p className="text-xs text-slate-400">Tanggal: {formatDateDisplay(item.tanggal)}</p>
                       </div>
                     ))}
                   </div>
@@ -3723,7 +4214,8 @@ export default function App() {
                           const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(localStorage));
                           const dlAnchorElem = document.createElement('a');
                           dlAnchorElem.setAttribute("href", dataStr);
-                          dlAnchorElem.setAttribute("download", `backup_mutabaah_${new Date().toISOString().split('T')[0]}.json`);
+                          const backupDate = getTodayDateStr();
+                          dlAnchorElem.setAttribute("download", `backup_mutabaah_${backupDate}.json`);
                           dlAnchorElem.click();
                         }}
                         className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-3 rounded-xl transition shadow-xs"
