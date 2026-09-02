@@ -2997,7 +2997,7 @@ export default function App() {
               return acc;
             }, {});
 
-            const canFilter = ['admin', 'kepsek', 'kurikulum', 'kesiswaan'].includes(currentUser.role);
+            const canFilter = ['admin', 'guru', 'kepsek', 'kurikulum', 'kesiswaan'].includes(currentUser.role);
 
             return (
               <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/80 shadow-sm space-y-6">
