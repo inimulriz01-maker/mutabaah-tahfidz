@@ -3035,12 +3035,6 @@ export default function App() {
                           Semua Waktu
                         </button>
                         <button 
-                          onClick={() => setAdminPeriodeFilter('hari')}
-                          className={`px-4 py-2 rounded-xl font-bold transition ${adminPeriodeFilter === 'hari' ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'}`}
-                        >
-                          Berdasarkan Hari
-                        </button>
-                        <button 
                           onClick={() => setAdminPeriodeFilter('tanggal')}
                           className={`px-4 py-2 rounded-xl font-bold transition ${adminPeriodeFilter === 'tanggal' ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'}`}
                         >
@@ -3060,26 +3054,6 @@ export default function App() {
                         </button>
                       </div>
                     </div>
-
-                    {adminPeriodeFilter === 'hari' && (
-                      <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-slate-200">
-                        <span className="font-semibold text-slate-700">Pilih Hari:</span>
-                        <select 
-                          value={adminFilterHari} 
-                          onChange={(e) => setAdminFilterHari(e.target.value)} 
-                          className="p-3 rounded-xl border border-slate-300 bg-white font-bold text-slate-800 shadow-2xs"
-                        >
-                          <option value="">Semua Hari</option>
-                          <option value="Senin">Senin</option>
-                          <option value="Selasa">Selasa</option>
-                          <option value="Rabu">Rabu</option>
-                          <option value="Kamis">Kamis</option>
-                          <option value="Jumat">Jumat</option>
-                          <option value="Sabtu">Sabtu</option>
-                          <option value="Minggu">Minggu</option>
-                        </select>
-                      </div>
-                    )}
 
                     {adminPeriodeFilter === 'tanggal' && (
                       <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-slate-200">

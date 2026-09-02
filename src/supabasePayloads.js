@@ -155,9 +155,6 @@ export function filterRiwayatRows(
       return false;
     }
 
-    if (adminPeriodeFilter === 'hari' && adminFilterHari) {
-      if (item.hari !== adminFilterHari) return false;
-    }
     if (adminPeriodeFilter === 'tanggal' && adminFilterTanggal) {
       if (item.tanggal !== adminFilterTanggal) return false;
     }
