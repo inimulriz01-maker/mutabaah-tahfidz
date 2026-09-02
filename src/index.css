@@ -1,1 +1,21 @@
 @import "tailwindcss";
+
+@media (min-width: 768px) and (orientation: landscape) {
+  .tablet-desktop-shell {
+    flex-direction: row !important;
+  }
+
+  .tablet-desktop-shell > aside {
+    display: flex !important;
+    width: 16rem !important;
+    min-width: 16rem !important;
+  }
+
+  .tablet-desktop-shell .mobile-topbar {
+    display: none !important;
+  }
+
+  .tablet-desktop-shell #main-scroll-area {
+    padding: 1.5rem !important;
+  }
+}

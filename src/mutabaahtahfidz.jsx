@@ -1937,17 +1937,17 @@ export default function App() {
     Number(item?.totalSkorPoin ?? 0) === 0;
 
   const scopedRiwayat = riwayat.filter((item) => {
-    if (currentUser?.role === 'guru') {
-      if (isLegacyPlaceholderRow(item)) return false;
-      return item.halaqoh === currentUser?.halaqoh;
-    }
+    if (isLegacyPlaceholderRow(item)) return false;
     return true;
   });
+
+  const dashboardRiwayat = currentUser.role === 'guru' ? riwayat : scopedRiwayat;
 
   const totalMuridSemua = Object.values(manageHalaqohData).reduce((acc, list) => acc + list.length, 0);
   const totalPengampuSemua = Object.keys(manageGuruPengampu).length;
   const totalHalaqohSemua = Object.keys(manageHalaqohData).length;
   const totalSesiPekan = 4;
+  const effectiveGuruFilter = currentUser.role === 'guru' ? 'Semua' : adminHalaqohFilter;
 
   const computeLeaderboard = (filteredRiwayatSource) => {
     const listUnik = [...new Set(filteredRiwayatSource.map(item => item.namaAnak))];
@@ -1962,9 +1962,12 @@ export default function App() {
     }).sort((a, b) => b.totalPoin - a.totalPoin);
   };
 
-  const todayRiwayat = scopedRiwayat.filter(i => i.tanggal === todayDateStr);
+  const leaderboardSourceToday = currentUser.role === 'guru' ? riwayat.filter(i => i.tanggal === todayDateStr) : scopedRiwayat.filter(i => i.tanggal === todayDateStr);
+  const leaderboardSourceAllTime = currentUser.role === 'guru' ? riwayat : scopedRiwayat;
+
+  const todayRiwayat = leaderboardSourceToday;
   const leaderboardToday = computeLeaderboard(todayRiwayat);
-  const leaderboardAllTime = computeLeaderboard(scopedRiwayat);
+  const leaderboardAllTime = computeLeaderboard(leaderboardSourceAllTime);
 
   const filteredPortalRiwayat = riwayat.filter((item) => {
     if (portalPeriodeFilter === 'hari' && portalFilterHari) return item.hari === portalFilterHari;
@@ -2002,7 +2005,7 @@ export default function App() {
   );
 
   const halaqohChartStats = Object.keys(manageHalaqohData).map(hName => {
-    const itemsInH = scopedRiwayat.filter(i => i.halaqoh === hName);
+    const itemsInH = dashboardRiwayat.filter(i => i.halaqoh === hName);
     const totalPts = itemsInH.reduce((acc, curr) => acc + curr.totalSkorPoin, 0);
     const totalHadirCount = itemsInH.filter(i => i.hadir === 'Hadir').length;
     return { halaqohName: hName, totalPts, totalHadirCount };
@@ -2154,10 +2157,10 @@ export default function App() {
   const dynamicNavItems = getBottomNavItems(currentUser.role);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col lg:flex-row antialiased overflow-hidden">
+    <div className="tablet-desktop-shell min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col md:flex-row antialiased overflow-hidden">
       
       {/* SIDEBAR */}
-      <aside className="hidden lg:flex w-64 bg-gradient-to-b from-blue-900 via-blue-900 to-blue-950 text-white p-6 flex-col justify-between shrink-0 shadow-2xl z-10 border-r border-blue-950">
+      <aside className="w-64 bg-gradient-to-b from-blue-900 via-blue-900 to-blue-950 text-white p-6 hidden md:flex flex-col justify-between shrink-0 shadow-2xl z-10 border-r border-blue-950">
         <div className="space-y-6">
           <div className="bg-blue-800/50 p-4 rounded-2xl border border-blue-700/50 flex items-center gap-3.5 shadow-inner">
             <div className="w-11 h-11 bg-white rounded-xl flex items-center justify-center shadow-md shrink-0 p-1 border border-slate-100">
@@ -2206,7 +2209,7 @@ export default function App() {
 
       {/* KONTEN UTAMA */}
       <div className="flex-1 flex flex-col h-screen relative overflow-hidden">
-        <header className="lg:hidden bg-white px-5 py-3.5 flex justify-between items-center sticky top-0 z-40 border-b border-slate-200/80 shadow-2xs">
+        <header className="mobile-topbar md:hidden bg-white px-5 py-3.5 flex justify-between items-center sticky top-0 z-40 border-b border-slate-200/80 shadow-2xs">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-white rounded-xl flex items-center justify-center shadow-xs shrink-0 p-1 border border-slate-100">
               <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
@@ -2233,7 +2236,7 @@ export default function App() {
           </div>
         </header>
 
-        <main id="main-scroll-area" className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 space-y-6 pb-36 lg:pb-10 bg-gradient-to-br from-slate-50 via-blue-50/20 to-slate-100/50">
+        <main id="main-scroll-area" className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 space-y-6 pb-36 md:pb-10 bg-gradient-to-br from-slate-50 via-blue-50/20 to-slate-100/50">
 
           {activeMenu === 'dashboard' && (
             <div className="space-y-6">
@@ -2243,7 +2246,7 @@ export default function App() {
                     {currentUser.role === 'kepsek' 
                       ? 'Dashboard Eksekutif Kepala Sekolah' 
                       : currentUser.role === 'guru' 
-                      ? `Dashboard ${currentUser.halaqoh}` 
+                      ? 'Dashboard Kompetisi Umum Semua Halaqoh' 
                       : currentUser.role === 'kurikulum'
                       ? 'Dashboard Bagian Kurikulum'
                       : currentUser.role === 'kesiswaan'
@@ -2252,8 +2255,8 @@ export default function App() {
                   </h2>
                   <p className="text-blue-100/90 text-sm mt-1 font-medium">
                     {currentUser.role === 'guru' 
-                      ? `Pantau rekapitulasi setoran hafalan dan perkembangan murid di ${currentUser.halaqoh}.` 
-                      : `Pantau rekapitulasi setoran hafalan, kehadiran, dan kedisiplinan murid secara real-time.`}
+                      ? 'Pantau rekapitulasi setoran hafalan, tren kehadiran, dan peringkat seluruh halaqoh secara real-time.' 
+                      : 'Pantau rekapitulasi setoran hafalan, kehadiran, dan kedisiplinan murid secara real-time.'}
                   </p>
                 </div>
                 <div className="bg-blue-800/90 border border-blue-600/80 px-4 py-2.5 rounded-2xl text-xs font-semibold text-blue-100 shrink-0 shadow-inner flex items-center gap-2">
@@ -2322,101 +2325,50 @@ export default function App() {
               )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {currentUser.role === 'guru' ? (
-                  <>
-                    <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-500 font-bold block truncate">Total Murid</span>
-                        <span className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1 block truncate">{manageHalaqohData[currentUser.halaqoh]?.length || 0}</span>
-                      </div>
-                      <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 shadow-inner">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                        </svg>
-                      </div>
-                    </div>
-                    <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-500 font-bold block truncate">Nama Halaqoh</span>
-                        <span className="text-xs sm:text-sm font-extrabold text-blue-600 mt-1 block truncate">{currentUser.halaqoh}</span>
-                      </div>
-                      <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 shadow-inner">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                        </svg>
-                      </div>
-                    </div>
-                    <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-500 font-bold block truncate">Pengampu</span>
-                        <span className="text-xs sm:text-sm font-extrabold text-slate-800 mt-1 block truncate">{currentUser.name}</span>
-                      </div>
-                      <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 shadow-inner">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                        </svg>
-                      </div>
-                    </div>
-                    <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-500 font-bold block truncate">Sesi / Pekan</span>
-                        <span className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1 block truncate">{totalSesiPekan} Sesi</span>
-                      </div>
-                      <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0 shadow-inner">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-500 font-bold block truncate">Total Murid</span>
-                        <span className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1 block truncate">{totalMuridSemua}</span>
-                      </div>
-                      <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 shadow-inner">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                        </svg>
-                      </div>
-                    </div>
-                    <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-500 font-bold block truncate">Total Pengampu</span>
-                        <span className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1 block truncate">{totalPengampuSemua}</span>
-                      </div>
-                      <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 shadow-inner">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                        </svg>
-                      </div>
-                    </div>
-                    <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-500 font-bold block truncate">Total Halaqoh</span>
-                        <span className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1 block truncate">{totalHalaqohSemua}</span>
-                      </div>
-                      <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 shadow-inner">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                        </svg>
-                      </div>
-                    </div>
-                    <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-500 font-bold block truncate">Sesi / Pekan</span>
-                        <span className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1 block truncate">{totalSesiPekan} Sesi</span>
-                      </div>
-                      <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0 shadow-inner">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                      </div>
-                    </div>
-                  </>
-                )}
+                <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-500 font-bold block truncate">Total Murid</span>
+                    <span className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1 block truncate">{totalMuridSemua}</span>
+                  </div>
+                  <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 shadow-inner">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                    </svg>
+                  </div>
+                </div>
+                <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-500 font-bold block truncate">Total Pengampu</span>
+                    <span className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1 block truncate">{totalPengampuSemua}</span>
+                  </div>
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 shadow-inner">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                  </div>
+                </div>
+                <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-500 font-bold block truncate">Total Halaqoh</span>
+                    <span className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1 block truncate">{totalHalaqohSemua}</span>
+                  </div>
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 shadow-inner">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                    </svg>
+                  </div>
+                </div>
+                <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex items-center justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[10px] sm:text-[11px] uppercase tracking-wider text-slate-500 font-bold block truncate">Sesi / Pekan</span>
+                    <span className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1 block truncate">{totalSesiPekan} Sesi</span>
+                  </div>
+                  <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0 shadow-inner">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                </div>
               </div>
 
               {currentUser.role === 'admin' && (
@@ -2588,13 +2540,13 @@ export default function App() {
                   <div className="grid grid-cols-2 gap-4 pt-2">
                     <div className="p-5 bg-gradient-to-br from-slate-50 to-blue-50/40 rounded-2xl border border-slate-200/70 flex flex-col justify-between space-y-2 shadow-2xs">
                       <span className="text-xs text-slate-500 font-bold uppercase tracking-wider">Total Sesi Tercatat</span>
-                      <span className="text-2xl sm:text-3xl font-extrabold text-slate-900">{riwayat.length} <span className="text-sm font-normal text-slate-500">Sesi</span></span>
+                      <span className="text-2xl sm:text-3xl font-extrabold text-slate-900">{dashboardRiwayat.length} <span className="text-sm font-normal text-slate-500">Sesi</span></span>
                       <span className="text-xs text-emerald-700 font-bold bg-emerald-100/70 px-2.5 py-1 rounded-lg inline-block w-fit">● Aktif Berjalan</span>
                     </div>
                     <div className="p-5 bg-gradient-to-br from-slate-50 to-blue-50/40 rounded-2xl border border-slate-200/70 flex flex-col justify-between space-y-2 shadow-2xs">
                       <span className="text-xs text-slate-500 font-bold uppercase tracking-wider">Rata-rata Skor Adab</span>
                       <span className="text-2xl sm:text-3xl font-extrabold text-blue-600">
-                        {riwayat.length > 0 ? (riwayat.reduce((a, c) => a + c.skorAdab, 0) / riwayat.length).toFixed(1) : '0'} <span className="text-sm font-normal text-slate-500">/ 10</span>
+                        {dashboardRiwayat.length > 0 ? (dashboardRiwayat.reduce((a, c) => a + c.skorAdab, 0) / dashboardRiwayat.length).toFixed(1) : '0'} <span className="text-sm font-normal text-slate-500">/ 10</span>
                       </span>
                       <span className="text-xs text-blue-700 font-bold bg-blue-100/70 px-2.5 py-1 rounded-lg inline-block w-fit">★ Sangat Baik</span>
                     </div>
@@ -2612,16 +2564,17 @@ export default function App() {
               {currentUser.role === 'guru' && (
                 <div className="bg-white p-6 sm:p-7 rounded-3xl border border-slate-200/80 shadow-sm space-y-4">
                   <h3 className="text-sm font-bold text-slate-900 border-b border-slate-100 pb-3">
-                    👥 Daftar Data Murid di {currentUser.halaqoh}
+                    👥 Top Murid Terbaik Seluruh Halaqoh
                   </h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                    {manageHalaqohData[currentUser.halaqoh]?.map((m, idx) => (
-                      <div key={idx} className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/70 flex flex-col justify-between text-sm space-y-1.5 shadow-2xs">
+                    {leaderboardAllTime.slice(0, 9).map((m, idx) => (
+                      <div key={m.namaKey} className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/70 flex flex-col justify-between text-sm space-y-1.5 shadow-2xs">
                         <div className="flex justify-between items-start gap-2">
-                          <span className="font-bold text-slate-900">{idx + 1}. {m}</span>
-                          <span className="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-xl font-bold shrink-0 whitespace-nowrap border border-emerald-200/60">{storedStudentDetails[m]?.kelas || '-'}</span>
+                          <span className="font-bold text-slate-900">{idx + 1}. {m.namaAsli}</span>
+                          <span className="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-xl font-bold shrink-0 whitespace-nowrap border border-emerald-200/60">{m.totalPoin} Poin</span>
                         </div>
-                        <span className="text-xs text-slate-500 font-mono">NISN: {storedStudentDetails[m]?.nisn || '-'} | Target: {storedStudentDetails[m]?.target || '3 Juz'}</span>
+                        <span className="text-xs text-slate-500 font-medium">{m.halaqohAnak}</span>
+                        <span className="text-xs text-slate-500 font-mono">Hadir: {m.totalHadir} sesi | Setoran: {m.totalSetoranSurat}</span>
                       </div>
                     ))}
                   </div>
@@ -2640,7 +2593,6 @@ export default function App() {
                 ) : (
                   <div className="space-y-2.5">
                     {leaderboardAllTime
-                      .filter(m => currentUser.role !== 'guru' || m.halaqohAnak === currentUser.halaqoh)
                       .slice(0, 15)
                       .map((m, idx) => (
                         <div key={m.namaKey} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 bg-slate-50/80 hover:bg-slate-100/80 rounded-2xl border border-slate-200/70 text-sm gap-3 transition shadow-2xs">
@@ -2993,7 +2945,6 @@ export default function App() {
                 </div>
 
                 {Object.entries(manageHalaqohData)
-                  .filter(([namaHalaqoh]) => currentUser.role !== 'guru' || namaHalaqoh === currentUser.halaqoh)
                   .map(([namaHalaqoh, listMurid]) => (
                     <div key={namaHalaqoh} className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm space-y-3.5">
                       <div className="flex justify-between items-center border-b border-slate-100 pb-2.5">
@@ -3033,7 +2984,7 @@ export default function App() {
             const filteredRiwayat = filterRiwayatRows(
               riwayat,
               currentUser,
-              adminHalaqohFilter,
+              effectiveGuruFilter,
               adminPeriodeFilter,
               adminFilterHari,
               adminFilterTanggal,
@@ -3046,7 +2997,7 @@ export default function App() {
               return acc;
             }, {});
 
-            const canFilter = ['admin', 'guru', 'kepsek', 'kurikulum', 'kesiswaan'].includes(currentUser.role);
+            const canFilter = ['admin', 'kepsek', 'kurikulum', 'kesiswaan'].includes(currentUser.role);
 
             return (
               <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/80 shadow-sm space-y-6">
@@ -3290,7 +3241,7 @@ export default function App() {
                 ) : (
                   <div className="space-y-6">
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-2">
-                      <span className="font-bold text-blue-900 text-sm">Menampilkan Rekap untuk: {currentUser.role === 'guru' ? currentUser.halaqoh : adminHalaqohFilter}</span>
+                      <span className="font-bold text-blue-900 text-sm">Menampilkan Rekap untuk: {currentUser.role === 'guru' ? 'Semua Halaqoh' : adminHalaqohFilter}</span>
                       {canFilter && adminHalaqohFilter !== 'Semua' && (
                         <button onClick={() => setAdminHalaqohFilter('Semua')} className="text-blue-600 font-bold hover:underline text-xs">Tampilkan Semua Halaqoh</button>
                       )}
@@ -4240,7 +4191,7 @@ export default function App() {
 
         </main>
 
-        <nav className="lg:hidden bg-white border-t border-slate-200/80 px-2 py-2 fixed bottom-0 left-0 right-0 z-40 shadow-xl">
+        <nav className="md:hidden bg-white border-t border-slate-200/80 px-2 py-2 fixed bottom-0 left-0 right-0 z-40 shadow-xl">
           <div className="flex gap-2 overflow-x-auto px-1 py-1 scroll-smooth snap-x snap-mandatory" style={{ WebkitOverflowScrolling: 'touch' }}>
             {dynamicNavItems.map(item => (
               <button
