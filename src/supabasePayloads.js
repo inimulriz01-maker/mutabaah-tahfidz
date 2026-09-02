@@ -150,7 +150,7 @@ export function filterRiwayatRows(
       return false;
     }
 
-    const activeHalaqohFilter = currentUser?.role === 'guru' ? 'Semua' : adminHalaqohFilter;
+    const activeHalaqohFilter = adminHalaqohFilter || 'Semua';
     if (activeHalaqohFilter !== 'Semua' && item.halaqoh !== activeHalaqohFilter) {
       return false;
     }

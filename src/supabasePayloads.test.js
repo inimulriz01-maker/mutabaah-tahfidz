@@ -110,6 +110,18 @@ test('filterRiwayatRows supports halaqoh and periode filters', () => {
   assert.equal(result[0].halaqoh, 'Halaqoh Tsuroyya');
 });
 
+test('filterRiwayatRows respects a guru-selected halaqoh instead of forcing all halaqoh', () => {
+  const rows = [
+    { id: 1, halaqoh: 'Halaqoh Abror', tanggal: '2026-08-10', hari: 'Senin', pekanLabel: 'Pekan 2 Bulan Agustus 2026', hadir: 'Hadir', jenisSetoran: 'Ziyadah (Hafalan Baru)', rincianCapaian: 'A', predikat: 'Qowy (Kuat)', skorAdab: 1, skorCapaian: 0, totalSkorPoin: 1 },
+    { id: 2, halaqoh: 'Halaqoh Tsuroyya', tanggal: '2026-08-11', hari: 'Selasa', pekanLabel: 'Pekan 2 Bulan Agustus 2026', hadir: 'Hadir', jenisSetoran: 'Ziyadah (Hafalan Baru)', rincianCapaian: 'B', predikat: 'Qowy (Kuat)', skorAdab: 1, skorCapaian: 0, totalSkorPoin: 1 }
+  ];
+
+  const result = filterRiwayatRows(rows, { role: 'guru', halaqoh: 'Halaqoh Abror' }, 'Halaqoh Abror', 'semua', '', '', '', '');
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].halaqoh, 'Halaqoh Abror');
+});
+
 test('filterRiwayatRows hides legacy placeholder rows for all roles', () => {
   const rows = [
     { id: 1, halaqoh: 'Halaqoh Tsuroyya', tanggal: '2026-08-10', hadir: '-', jenisSetoran: '-', rincianCapaian: '-', predikat: '-', skorAdab: 0, skorCapaian: 0, totalSkorPoin: 0 },

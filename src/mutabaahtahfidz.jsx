@@ -1947,7 +1947,7 @@ export default function App() {
   const totalPengampuSemua = Object.keys(manageGuruPengampu).length;
   const totalHalaqohSemua = Object.keys(manageHalaqohData).length;
   const totalSesiPekan = 4;
-  const effectiveGuruFilter = currentUser.role === 'guru' ? 'Semua' : adminHalaqohFilter;
+  const effectiveGuruFilter = adminHalaqohFilter;
 
   const computeLeaderboard = (filteredRiwayatSource) => {
     const listUnik = [...new Set(filteredRiwayatSource.map(item => item.namaAnak))];
@@ -3215,7 +3215,7 @@ export default function App() {
                 ) : (
                   <div className="space-y-6">
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-2">
-                      <span className="font-bold text-blue-900 text-sm">Menampilkan Rekap untuk: {currentUser.role === 'guru' ? 'Semua Halaqoh' : adminHalaqohFilter}</span>
+                      <span className="font-bold text-blue-900 text-sm">Menampilkan Rekap untuk: {adminHalaqohFilter}</span>
                       {canFilter && adminHalaqohFilter !== 'Semua' && (
                         <button onClick={() => setAdminHalaqohFilter('Semua')} className="text-blue-600 font-bold hover:underline text-xs">Tampilkan Semua Halaqoh</button>
                       )}
